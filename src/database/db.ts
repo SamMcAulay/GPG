@@ -31,8 +31,22 @@ export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+type SqliteRunner = { exec(sql: string): void };
+
 /**
- * Create tables if they don't already exist. Called once at boot.
+ * Check whether a column already exists on a table. SQLite doesn't support
+ * "ALTER TABLE ADD COLUMN IF NOT EXISTS", so we introspect the schema first.
+ */
+function columnExists(table: string, column: string): boolean {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+        name: string;
+    }>;
+    return rows.some((r) => r.name === column);
+}
+
+/**
+ * Create tables if they don't already exist, and apply lightweight
+ * migrations for schema changes on existing databases. Called once at boot.
  */
 export function initSchema(): void {
     const schemaSql = `
@@ -46,6 +60,7 @@ export function initSchema(): void {
             time TEXT NOT NULL,
             description TEXT,
             createdBy TEXT NOT NULL,
+            raiderRoleId TEXT,
             createdAt INTEGER NOT NULL DEFAULT (strftime('%s','now'))
         );
 
@@ -63,8 +78,17 @@ export function initSchema(): void {
         CREATE INDEX IF NOT EXISTS idx_signups_raid ON Signups(raidId);
         CREATE INDEX IF NOT EXISTS idx_raids_message ON Raids(messageId);
     `;
-    db.prepare('SELECT 1').get(); // sanity touch
-    // better-sqlite3 runs multi-statement SQL via the .exec method on the Database instance
-    (db as unknown as { exec(sql: string): void }).exec(schemaSql);
+    (db as unknown as SqliteRunner).exec(schemaSql);
+
+    // Migration: add raiderRoleId column to existing Raids tables that
+    // pre-date this feature. No-op on fresh databases where the CREATE
+    // TABLE above already included the column.
+    if (!columnExists('Raids', 'raiderRoleId')) {
+        (db as unknown as SqliteRunner).exec(
+            'ALTER TABLE Raids ADD COLUMN raiderRoleId TEXT'
+        );
+        console.log('[DB] Migration: added Raids.raiderRoleId column.');
+    }
+
     console.log('[DB] Schema ready.');
 }

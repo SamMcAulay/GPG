@@ -84,8 +84,8 @@ async function registerSlashCommands(client: Client<true>): Promise<void> {
 
 export async function execute(client: Client<true>): Promise<void> {
     console.log(
-        `[Ready] Grey Parse Gary is online as ${client.user.tag}. ` +
-            `Parsing grey in ${client.guilds.cache.size} guild(s).`
+        `[Ready] Logged in as ${client.user.tag}. ` +
+            `Connected to ${client.guilds.cache.size} guild(s).`
     );
     await registerSlashCommands(client);
 }

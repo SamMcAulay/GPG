@@ -6,11 +6,22 @@ A World of Warcraft guild raid-attendance Discord bot. Gary parses grey, but he 
 
 ## Features
 
-- `/makeraid` — post a raid signup embed with name, date, time, description.
+- `/makeraid` — post a raid signup embed with name, date, time, description, and an optional role filter.
 - Buttons for **Tank / Healer / DPS / Late / Decline**.
 - Live roster updates in the embed; clicking a new role moves you automatically.
+- "Not Responded" field lists members who haven't clicked a button yet.
 - SQLite persistence, safe for Railway deploys via Volume mounts.
 - **Zero-config deploy:** slash commands auto-register on startup, schema auto-creates, DB auto-locates the Railway volume.
+
+## Required: enable the Server Members privileged intent
+
+The "Not Responded" list requires the bot to enumerate guild members, which needs Discord's privileged **Server Members Intent**. Enable it once:
+
+1. Go to https://discord.com/developers/applications → your app → **Bot**.
+2. Scroll to **Privileged Gateway Intents**.
+3. Toggle **Server Members Intent** on and hit **Save Changes**.
+
+If this isn't enabled the bot will fail to start with a `DisallowedIntents` error.
 
 ## Tech
 

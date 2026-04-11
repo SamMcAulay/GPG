@@ -12,7 +12,7 @@ import {
     type RaidRole,
 } from '../database/raidRepository';
 import { buildRaidEmbed, buildRaidButtons } from '../utils/raidEmbed';
-import { getGaryQuip } from '../utils/garyQuips';
+import { computeNotResponded } from '../utils/raidHelpers';
 
 const VALID_ROLES: ReadonlySet<RaidRole> = new Set<RaidRole>([
     'tank',
@@ -22,13 +22,20 @@ const VALID_ROLES: ReadonlySet<RaidRole> = new Set<RaidRole>([
     'decline',
 ]);
 
+const ROLE_LABELS: Record<RaidRole, string> = {
+    tank: 'Tank',
+    healer: 'Healer',
+    dps: 'DPS',
+    late: 'Late',
+    decline: 'Decline',
+};
+
 async function handleSignupButton(interaction: ButtonInteraction): Promise<void> {
-    // CustomId is shaped `signup_<role>`.
     const role = interaction.customId.slice('signup_'.length) as RaidRole;
 
     if (!VALID_ROLES.has(role)) {
         await interaction.reply({
-            content: "That button doesn't look right to me. Gary is confused.",
+            content: 'Unknown button.',
             flags: MessageFlags.Ephemeral,
         });
         return;
@@ -38,7 +45,7 @@ async function handleSignupButton(interaction: ButtonInteraction): Promise<void>
     if (!raid) {
         await interaction.reply({
             content:
-                "This raid post isn't in my memory anymore — maybe it was cleared out. Ask leadership to run `/makeraid` again.",
+                'This raid post is no longer tracked. Ask leadership to create a new one with `/makeraid`.',
             flags: MessageFlags.Ephemeral,
         });
         return;
@@ -59,7 +66,12 @@ async function handleSignupButton(interaction: ButtonInteraction): Promise<void>
     });
 
     const roster = getRoster(raid.id);
-    const embed = buildRaidEmbed(raid, roster);
+    const guild = interaction.guild;
+    const notResponded = guild
+        ? await computeNotResponded(guild, raid, roster)
+        : [];
+
+    const embed = buildRaidEmbed(raid, roster, notResponded);
 
     // interaction.update() edits the original message in place, which both
     // acknowledges the interaction AND refreshes the embed atomically.
@@ -68,10 +80,8 @@ async function handleSignupButton(interaction: ButtonInteraction): Promise<void>
         components: [buildRaidButtons()],
     });
 
-    // Fire a secondary ephemeral quip so the user gets direct feedback
-    // without cluttering the channel.
     await interaction.followUp({
-        content: getGaryQuip(role),
+        content: `Signed up as **${ROLE_LABELS[role]}**.`,
         flags: MessageFlags.Ephemeral,
     });
 }
@@ -85,7 +95,7 @@ export async function execute(interaction: Interaction): Promise<void> {
             const command = commands[interaction.commandName];
             if (!command) {
                 await interaction.reply({
-                    content: "I don't know that command. Gary shrugs.",
+                    content: 'Unknown command.',
                     flags: MessageFlags.Ephemeral,
                 });
                 return;
@@ -101,12 +111,15 @@ export async function execute(interaction: Interaction): Promise<void> {
     } catch (err) {
         console.error('[interactionCreate] handler error:', err);
         if (interaction.isRepliable()) {
-            const msg =
-                "Something went sideways. I probably stood in the fire again. Try once more?";
+            const msg = 'Something went wrong handling that interaction. Please try again.';
             if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
+                await interaction
+                    .followUp({ content: msg, flags: MessageFlags.Ephemeral })
+                    .catch(() => {});
             } else {
-                await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
+                await interaction
+                    .reply({ content: msg, flags: MessageFlags.Ephemeral })
+                    .catch(() => {});
             }
         }
     }

@@ -6,88 +6,82 @@ import {
 } from 'discord.js';
 import type { Raid, RaidRoster, Signup } from '../database/raidRepository';
 
-// Soft caps per role — used only for the tally display, not enforced.
-const ROLE_TARGETS = {
-    tank: 2,
-    healer: 5,
-    dps: 13,
-} as const;
+const EMBED_COLOR = 0x2b6cb0;
 
-const GARY_GREY = 0x9e9e9e;
+// Discord caps embed field values at 1024 chars. We truncate the
+// "not responded" list well below that to keep the embed readable.
+const MAX_NOT_RESPONDED_NAMES = 25;
 
-/**
- * Render a list of signups as a newline-separated string of display names.
- * Shows "—" when empty so the field doesn't collapse in the embed.
- */
 function formatRoster(signups: Signup[]): string {
     if (signups.length === 0) return '—';
     return signups.map((s) => `• ${s.userName}`).join('\n');
 }
 
-export function buildRaidEmbed(raid: Raid, roster: RaidRoster): EmbedBuilder {
-    const tankCount = roster.tank.length;
-    const healerCount = roster.healer.length;
-    const dpsCount = roster.dps.length;
-    const lateCount = roster.late.length;
-    const declineCount = roster.decline.length;
+function formatNotResponded(names: string[]): string {
+    if (names.length === 0) return '—';
+    const shown = names.slice(0, MAX_NOT_RESPONDED_NAMES);
+    const remainder = names.length - shown.length;
+    const lines = shown.map((n) => `• ${n}`);
+    if (remainder > 0) {
+        lines.push(`…and ${remainder} more`);
+    }
+    return lines.join('\n');
+}
 
+export function buildRaidEmbed(
+    raid: Raid,
+    roster: RaidRoster,
+    notRespondedNames: string[]
+): EmbedBuilder {
     const embed = new EmbedBuilder()
-        .setColor(GARY_GREY)
-        .setTitle(`⚔️ ${raid.name}`)
-        .setDescription(
-            (raid.description ?? '') +
-                "\n\n*I might have stood in the fire, but at least I RSVP'd on time. Sign up below.*"
-        )
+        .setColor(EMBED_COLOR)
+        .setTitle(raid.name)
         .addFields(
-            {
-                name: '📅 Date',
-                value: raid.date,
-                inline: true,
-            },
-            {
-                name: '🕒 Time',
-                value: raid.time,
-                inline: true,
-            },
-            {
-                name: '\u200b',
-                value: '\u200b',
-                inline: true,
-            },
-            {
-                name: `🛡️ Tanks (${tankCount}/${ROLE_TARGETS.tank})`,
-                value: formatRoster(roster.tank),
-                inline: true,
-            },
-            {
-                name: `💉 Healers (${healerCount}/${ROLE_TARGETS.healer})`,
-                value: formatRoster(roster.healer),
-                inline: true,
-            },
-            {
-                name: `⚔️ DPS (${dpsCount}/${ROLE_TARGETS.dps})`,
-                value: formatRoster(roster.dps),
-                inline: true,
-            },
-            {
-                name: `🕒 Late (${lateCount})`,
-                value: formatRoster(roster.late),
-                inline: true,
-            },
-            {
-                name: `❌ Bench/Decline (${declineCount})`,
-                value: formatRoster(roster.decline),
-                inline: true,
-            },
-            {
-                name: '\u200b',
-                value: '\u200b',
-                inline: true,
-            }
-        )
-        .setFooter({
-            text: `Grey Parse Gary • Posted by ${raid.createdBy} • Don't forget your flask`,
-        })
+            { name: 'Date', value: raid.date, inline: true },
+            { name: 'Time', value: raid.time, inline: true },
+            { name: '\u200b', value: '\u200b', inline: true }
+        );
+
+    if (raid.description && raid.description.trim().length > 0) {
+        embed.setDescription(raid.description);
+    }
+
+    embed.addFields(
+        {
+            name: `🛡️ Tanks (${roster.tank.length})`,
+            value: formatRoster(roster.tank),
+            inline: true,
+        },
+        {
+            name: `💉 Healers (${roster.healer.length})`,
+            value: formatRoster(roster.healer),
+            inline: true,
+        },
+        {
+            name: `⚔️ DPS (${roster.dps.length})`,
+            value: formatRoster(roster.dps),
+            inline: true,
+        },
+        {
+            name: `🕒 Late (${roster.late.length})`,
+            value: formatRoster(roster.late),
+            inline: true,
+        },
+        {
+            name: `❌ Decline (${roster.decline.length})`,
+            value: formatRoster(roster.decline),
+            inline: true,
+        },
+        { name: '\u200b', value: '\u200b', inline: true },
+        {
+            name: `⏳ Not Responded (${notRespondedNames.length})`,
+            value: formatNotResponded(notRespondedNames),
+            inline: false,
+        }
+    );
+
+    embed
+        .setFooter({ text: `Posted by ${raid.createdBy}` })
         .setTimestamp(new Date(raid.createdAt * 1000));
 
     return embed;

@@ -15,9 +15,14 @@ if (!token) {
 initSchema();
 
 const client = new Client({
-    // Gary only needs to post embeds, read slash commands, and react to buttons.
-    // Guilds is the only intent strictly required for slash commands + buttons.
-    intents: [GatewayIntentBits.Guilds],
+    // - Guilds: required for slash commands and button interactions.
+    // - GuildMembers: PRIVILEGED intent, required so the bot can enumerate
+    //   guild members and compute the "Not Responded" list on raid embeds.
+    //   You MUST enable this under Discord Developer Portal → your app →
+    //   Bot → Privileged Gateway Intents → "Server Members Intent".
+    //   If it's not enabled, the client will fail to log in with a
+    //   DisallowedIntents error.
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
     partials: [Partials.Message, Partials.Channel],
 });
 

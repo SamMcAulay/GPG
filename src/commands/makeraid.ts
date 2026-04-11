@@ -5,14 +5,15 @@ import {
 } from 'discord.js';
 import { createRaid, getRoster } from '../database/raidRepository';
 import { buildRaidButtons, buildRaidEmbed } from '../utils/raidEmbed';
+import { computeNotResponded } from '../utils/raidHelpers';
 
 export const data = new SlashCommandBuilder()
     .setName('makeraid')
-    .setDescription('Create a new raid signup post (Gary approves)')
+    .setDescription('Create a new raid signup post')
     .addStringOption((opt) =>
         opt
             .setName('name')
-            .setDescription('Raid name, e.g. "Molten Core Farm"')
+            .setDescription('Raid name')
             .setRequired(true)
             .setMaxLength(100)
     )
@@ -33,15 +34,23 @@ export const data = new SlashCommandBuilder()
     .addStringOption((opt) =>
         opt
             .setName('description')
-            .setDescription('Anything else the raid team should know')
+            .setDescription('Optional extra details')
             .setRequired(false)
             .setMaxLength(1000)
+    )
+    .addRoleOption((opt) =>
+        opt
+            .setName('role')
+            .setDescription(
+                'Optional: restrict the "Not Responded" list to members with this role'
+            )
+            .setRequired(false)
     );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.inGuild()) {
         await interaction.reply({
-            content: "I can only schedule raids inside a guild channel. Gary's orders.",
+            content: 'This command can only be used inside a server.',
             flags: MessageFlags.Ephemeral,
         });
         return;
@@ -51,14 +60,19 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const date = interaction.options.getString('date', true);
     const time = interaction.options.getString('time', true);
     const description = interaction.options.getString('description', false);
+    const raiderRole = interaction.options.getRole('role', false);
+    const raiderRoleId = raiderRole?.id ?? null;
 
-    // Defer so we have time to post the message and insert the row.
     await interaction.deferReply();
 
-    // We need a messageId before we can save — so post first with a draft
-    // embed, then fetch the message ID, then insert the Raid row, then
-    // edit the posted message with the real (identical) embed. This keeps
-    // the flow simple and avoids placeholder rows in the DB.
+    const createdBy =
+        interaction.member && 'displayName' in interaction.member
+            ? (interaction.member.displayName as string)
+            : interaction.user.username;
+
+    // Post an initial embed with an empty roster so we can capture the
+    // message ID, then persist the raid row, then re-render with the
+    // real ID so the footer timestamp matches the DB record.
     const placeholderRaid = {
         id: 0,
         messageId: '',
@@ -68,10 +82,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         date,
         time,
         description,
-        createdBy:
-            interaction.member && 'displayName' in interaction.member
-                ? (interaction.member.displayName as string)
-                : interaction.user.username,
+        createdBy,
+        raiderRoleId,
         createdAt: Math.floor(Date.now() / 1000),
     };
 
@@ -83,7 +95,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         decline: [],
     };
 
-    const embed = buildRaidEmbed(placeholderRaid, emptyRoster);
+    // Compute the initial "not responded" list right away so the post
+    // is useful the moment it lands.
+    const guild = interaction.guild!;
+    const initialNotResponded = await computeNotResponded(
+        guild,
+        placeholderRaid,
+        emptyRoster
+    );
+
+    const embed = buildRaidEmbed(placeholderRaid, emptyRoster, initialNotResponded);
     const components = [buildRaidButtons()];
 
     const sent = await interaction.editReply({
@@ -91,7 +112,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         components,
     });
 
-    // Persist so future button clicks can resolve this raid.
     const raid = createRaid({
         messageId: sent.id,
         channelId: sent.channelId,
@@ -100,11 +120,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         date,
         time,
         description,
-        createdBy: placeholderRaid.createdBy,
+        createdBy,
+        raiderRoleId,
     });
 
-    // Re-render with the real raid row (so the footer timestamp matches DB).
-    const freshEmbed = buildRaidEmbed(raid, getRoster(raid.id));
+    const freshRoster = getRoster(raid.id);
+    const freshNotResponded = await computeNotResponded(guild, raid, freshRoster);
+    const freshEmbed = buildRaidEmbed(raid, freshRoster, freshNotResponded);
     await interaction.editReply({
         embeds: [freshEmbed],
         components,
