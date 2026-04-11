@@ -4,7 +4,7 @@ import {
     MessageFlags,
 } from 'discord.js';
 import { createRaid, getRoster } from '../database/raidRepository';
-import { buildRaidButtons, buildRaidEmbed } from '../utils/raidEmbed';
+import { buildRaidButtons, buildRaidEmbed, toEmptyEnriched } from '../utils/raidEmbed';
 import { computeNotResponded } from '../utils/raidHelpers';
 
 export const data = new SlashCommandBuilder()
@@ -104,7 +104,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         emptyRoster
     );
 
-    const embed = buildRaidEmbed(placeholderRaid, emptyRoster, initialNotResponded);
+    const embed = buildRaidEmbed(
+        placeholderRaid,
+        toEmptyEnriched(emptyRoster),
+        initialNotResponded
+    );
     const components = [buildRaidButtons()];
 
     const sent = await interaction.editReply({
@@ -126,7 +130,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     const freshRoster = getRoster(raid.id);
     const freshNotResponded = await computeNotResponded(guild, raid, freshRoster);
-    const freshEmbed = buildRaidEmbed(raid, freshRoster, freshNotResponded);
+    const freshEmbed = buildRaidEmbed(
+        raid,
+        toEmptyEnriched(freshRoster),
+        freshNotResponded
+    );
     await interaction.editReply({
         embeds: [freshEmbed],
         components,

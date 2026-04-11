@@ -4,6 +4,7 @@ import { initSchema } from './database/db';
 import * as readyEvent from './events/ready';
 import * as interactionCreateEvent from './events/interactionCreate';
 import * as guildCreateEvent from './events/guildCreate';
+import { startHttpServer } from './http/server';
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -13,6 +14,10 @@ if (!token) {
 
 // Ensure the SQLite schema exists before the bot starts taking interactions.
 initSchema();
+
+// Start the OAuth callback HTTP server. Bound first so Blizzard can
+// reach /auth/callback the moment a user clicks their /link URL.
+startHttpServer();
 
 const client = new Client({
     // - Guilds: required for slash commands and button interactions.

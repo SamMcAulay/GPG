@@ -77,6 +77,31 @@ export function initSchema(): void {
 
         CREATE INDEX IF NOT EXISTS idx_signups_raid ON Signups(raidId);
         CREATE INDEX IF NOT EXISTS idx_raids_message ON Raids(messageId);
+
+        CREATE TABLE IF NOT EXISTS BattleNetLinks (
+            discordUserId TEXT PRIMARY KEY,
+            battleTag TEXT,
+            accessToken TEXT NOT NULL,
+            refreshToken TEXT,
+            expiresAt INTEGER NOT NULL,
+            region TEXT NOT NULL,
+            linkedAt INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS CharacterCache (
+            discordUserId TEXT NOT NULL,
+            realmSlug TEXT NOT NULL,
+            characterName TEXT NOT NULL,
+            level INTEGER NOT NULL,
+            className TEXT NOT NULL,
+            activeSpec TEXT,
+            itemLevel INTEGER,
+            role TEXT,
+            fetchedAt INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            PRIMARY KEY (discordUserId, realmSlug, characterName)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_charcache_user ON CharacterCache(discordUserId);
     `;
     (db as unknown as SqliteRunner).exec(schemaSql);
 

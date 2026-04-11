@@ -13,6 +13,7 @@ import {
 } from '../database/raidRepository';
 import { buildRaidEmbed, buildRaidButtons } from '../utils/raidEmbed';
 import { computeNotResponded } from '../utils/raidHelpers';
+import { enrichRoster } from '../utils/rosterEnricher';
 
 const VALID_ROLES: ReadonlySet<RaidRole> = new Set<RaidRole>([
     'tank',
@@ -65,17 +66,20 @@ async function handleSignupButton(interaction: ButtonInteraction): Promise<void>
         role,
     });
 
+    // Battle.net character fetches can exceed Discord's 3-second interaction
+    // ack window, so defer the update before doing any async work.
+    await interaction.deferUpdate();
+
     const roster = getRoster(raid.id);
     const guild = interaction.guild;
-    const notResponded = guild
-        ? await computeNotResponded(guild, raid, roster)
-        : [];
+    const [enriched, notResponded] = await Promise.all([
+        enrichRoster(roster),
+        guild ? computeNotResponded(guild, raid, roster) : Promise.resolve([]),
+    ]);
 
-    const embed = buildRaidEmbed(raid, roster, notResponded);
+    const embed = buildRaidEmbed(raid, enriched, notResponded);
 
-    // interaction.update() edits the original message in place, which both
-    // acknowledges the interaction AND refreshes the embed atomically.
-    await interaction.update({
+    await interaction.editReply({
         embeds: [embed],
         components: [buildRaidButtons()],
     });

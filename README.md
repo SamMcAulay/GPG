@@ -7,8 +7,10 @@ A World of Warcraft guild raid-attendance Discord bot. Gary parses grey, but he 
 ## Features
 
 - `/makeraid` — post a raid signup embed with name, date, time, description, and an optional role filter.
+- `/link` — let guildies link their Battle.net account so the bot can display their WoW characters in signups.
 - Buttons for **Tank / Healer / DPS / Late / Decline**.
 - Live roster updates in the embed; clicking a new role moves you automatically.
+- When a user is linked, their level-90 characters whose current spec matches the role they clicked appear under their name with spec + ilvl.
 - "Not Responded" field lists members who haven't clicked a button yet.
 - SQLite persistence, safe for Railway deploys via Volume mounts.
 - **Zero-config deploy:** slash commands auto-register on startup, schema auto-creates, DB auto-locates the Railway volume.
@@ -56,14 +58,31 @@ npm start
 | `DISCORD_TOKEN` | ✅ | Bot token from the Discord Developer Portal. |
 | `GUILD_ID` | optional | If set, slash commands register only to that guild (appear instantly). Otherwise they register globally. |
 | `RAILWAY_VOLUME_MOUNT_PATH` | auto | Set by Railway when a Volume is attached; the bot falls back to `./data` locally. |
+| `BLIZZARD_CLIENT_ID` | for `/link` | Client ID from https://develop.battle.net/access/clients. |
+| `BLIZZARD_CLIENT_SECRET` | for `/link` | Client secret from the same place. |
+| `PUBLIC_BASE_URL` | for `/link` | Public HTTPS URL for the bot (e.g. `https://grey-parse-gary.up.railway.app`). The redirect URI registered with Blizzard must be `${PUBLIC_BASE_URL}/auth/callback`. |
+| `BLIZZARD_REGION` | optional | `us` (default), `eu`, `kr`, or `tw`. |
+| `BLIZZARD_PROFILE_NAMESPACE` | optional | Defaults to `profile-<region>` (Retail). Use `profile-classic-<region>` for Wrath/Cata/MoP Classic. |
+| `RAID_LEVEL` | optional | Defaults to `80` (Retail — Midnight cap). Flip if Blizzard bumps the cap. |
+| `PORT` | auto | Port the OAuth callback server listens on. Railway assigns this automatically. |
+
+## Battle.net linking setup
+
+1. Go to https://develop.battle.net/access/clients and click **Create Client**. Copy the Client ID and Secret.
+2. In Railway, open your service → **Settings → Networking** → **Generate Domain**. Copy the resulting URL.
+3. Back on the Blizzard client page, add a redirect URL: `<your-railway-domain>/auth/callback`. Save.
+4. In Railway, set `BLIZZARD_CLIENT_ID`, `BLIZZARD_CLIENT_SECRET`, and `PUBLIC_BASE_URL` (your Railway domain). Deploy.
+5. In Discord, users run `/link`, click the personal link they receive, approve on battle.net, and they're set. The next time they click a raid button, their level-80 characters for that role will appear in the embed.
 
 ## Project layout
 
 ```
 src/
-├── commands/         slash command definitions (/makeraid)
-├── database/         SQLite connection + raid repository
-├── events/           ready (auto-registers commands), interactionCreate
-├── utils/            embed builder, Gary quips
+├── blizzard/         Battle.net OAuth + WoW profile API client
+├── commands/         slash command definitions (/makeraid, /link)
+├── database/         SQLite connection + raid + battleNet repositories
+├── events/           ready, interactionCreate, guildCreate
+├── http/             Express server for the OAuth callback
+├── utils/            embed builder, roster enricher, helpers
 └── index.ts          main entry point
 ```

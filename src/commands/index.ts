@@ -14,7 +14,9 @@ export interface Command {
 }
 
 import * as makeraid from './makeraid';
+import * as link from './link';
 
 export const commands: Record<string, Command> = {
     [makeraid.data.name]: makeraid as Command,
+    [link.data.name]: link as Command,
 };
