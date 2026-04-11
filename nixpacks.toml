@@ -1,0 +1,10 @@
+# Override Nixpacks's default install phase so devDependencies (typescript,
+# @types/*) are available during the build phase. Without --include=dev,
+# Railway's build image defaults to a production install and `tsc` is missing.
+#
+# We only override the install phase — Nixpacks's auto-detected build phase
+# (which runs `npm run build`) and start phase (which runs `npm start`)
+# continue to work from package.json.
+
+[phases.install]
+cmds = ["npm ci --include=dev"]
