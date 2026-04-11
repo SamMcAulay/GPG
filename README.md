@@ -10,6 +10,7 @@ A World of Warcraft guild raid-attendance Discord bot. Gary parses grey, but he 
 - Buttons for **Tank / Healer / DPS / Late / Decline**.
 - Live roster updates in the embed; clicking a new role moves you automatically.
 - SQLite persistence, safe for Railway deploys via Volume mounts.
+- **Zero-config deploy:** slash commands auto-register on startup, schema auto-creates, DB auto-locates the Railway volume.
 
 ## Tech
 
@@ -17,25 +18,33 @@ A World of Warcraft guild raid-attendance Discord bot. Gary parses grey, but he 
 - [discord.js](https://discord.js.org) v14
 - [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)
 
-## Local development
+## Railway deployment (the intended path)
+
+1. **Fork / connect** this repo to a new Railway project.
+2. **Add a Volume** and mount it at a path like `/data`. Railway automatically exposes the mount path as `RAILWAY_VOLUME_MOUNT_PATH`, which the bot reads so the SQLite file survives redeploys.
+3. **Set one environment variable:** `DISCORD_TOKEN` — the bot token from the Discord Developer Portal. That's it.
+4. **Deploy.** Railway reads `railway.json`, runs `npm ci --include=dev && npm run build`, then `npm start`. On first boot, Gary logs in, registers `/makeraid` globally with Discord, and starts listening for interactions.
+
+No terminal access required. No manual command-registration step.
+
+> Global slash commands can take up to an hour to appear the very first time Discord sees them. If you want instant visibility in a single test server, set the optional `GUILD_ID` env var — the bot will register commands guild-scoped instead.
+
+## Local development (optional)
 
 ```bash
-cp .env.example .env   # fill in DISCORD_TOKEN and CLIENT_ID
+cp .env.example .env   # fill in DISCORD_TOKEN (and optional GUILD_ID)
 npm install
-npm run deploy-commands
 npm run build
 npm start
 ```
 
-During development, set `GUILD_ID` in `.env` so slash commands register instantly to your test guild instead of waiting on global rollout.
+## Environment variables
 
-## Railway deployment
-
-1. Create a new Railway project from this GitHub repo.
-2. Add a **Volume** mounted at e.g. `/data`. Railway will expose `RAILWAY_VOLUME_MOUNT_PATH` automatically — the bot reads from it so the SQLite file survives deploys.
-3. Set environment variables: `DISCORD_TOKEN`, `CLIENT_ID`.
-4. Railway runs `npm start` (which runs `node dist/index.js`). The `build` step runs automatically as part of the Nixpacks default Node pipeline.
-5. Run `npm run deploy-commands` once locally (or as a Railway one-off) to register slash commands with Discord.
+| Variable | Required | Purpose |
+|---|---|---|
+| `DISCORD_TOKEN` | ✅ | Bot token from the Discord Developer Portal. |
+| `GUILD_ID` | optional | If set, slash commands register only to that guild (appear instantly). Otherwise they register globally. |
+| `RAILWAY_VOLUME_MOUNT_PATH` | auto | Set by Railway when a Volume is attached; the bot falls back to `./data` locally. |
 
 ## Project layout
 
@@ -43,8 +52,7 @@ During development, set `GUILD_ID` in `.env` so slash commands register instantl
 src/
 ├── commands/         slash command definitions (/makeraid)
 ├── database/         SQLite connection + raid repository
-├── events/           ready, interactionCreate handlers
+├── events/           ready (auto-registers commands), interactionCreate
 ├── utils/            embed builder, Gary quips
-├── deploy-commands.ts  one-off command registration script
 └── index.ts          main entry point
 ```

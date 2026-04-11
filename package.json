@@ -6,8 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch",
-    "deploy-commands": "tsc && node dist/deploy-commands.js"
+    "dev": "tsc --watch"
   },
   "keywords": [
     "discord",
