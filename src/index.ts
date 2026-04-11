@@ -3,6 +3,7 @@ import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { initSchema } from './database/db';
 import * as readyEvent from './events/ready';
 import * as interactionCreateEvent from './events/interactionCreate';
+import * as guildCreateEvent from './events/guildCreate';
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -25,6 +26,9 @@ const client = new Client({
 client.once(readyEvent.name, (...args) => readyEvent.execute(...(args as [never])));
 client.on(interactionCreateEvent.name, (...args) =>
     interactionCreateEvent.execute(...(args as [never]))
+);
+client.on(guildCreateEvent.name, (...args) =>
+    guildCreateEvent.execute(...(args as [never]))
 );
 
 // Unhandled-rejection logging — surfaces discord.js errors that fall through.
