@@ -26,6 +26,7 @@ export interface CharacterDetails {
     className: string;
     activeSpecName: string | null;
     itemLevel: number | null;
+    lastPlayedTimestamp: number | null; // unix ms from Blizzard API
 }
 
 /**
@@ -98,6 +99,7 @@ export async function fetchCharacterDetails(
         active_spec?: { name?: string } | null;
         equipped_item_level?: number | null;
         average_item_level?: number | null;
+        last_played_timestamp?: number | null;
     };
 
     return {
@@ -110,5 +112,6 @@ export async function fetchCharacterDetails(
             json.equipped_item_level ??
             json.average_item_level ??
             null,
+        lastPlayedTimestamp: json.last_played_timestamp ?? null,
     };
 }

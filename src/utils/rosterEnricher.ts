@@ -1,11 +1,11 @@
-import type { RaidRoster, Signup } from '../database/raidRepository';
-import type { EnrichedRoster, EnrichedSignup } from './raidEmbed';
-import { getCharactersForRole } from '../blizzard/characterService';
-import type { ButtonRole } from '../blizzard/characterService';
+import type { RaidRoster, Signup, RaidRole } from '../database/raidRepository';
+import type { EnrichedRoster, EnrichedSignup, AnnotatedCharacter } from './raidEmbed';
+import { getAllCharactersForUser } from '../blizzard/characterService';
+import type { CachedCharacter } from '../database/battleNetRepository';
 
 /**
- * Look up the characters for every user currently signed up as tank/healer/
- * dps and return an enriched roster ready for buildRaidEmbed.
+ * Look up ALL characters for every signed-up user and return an enriched
+ * roster with main/alt/offspec annotations.
  *
  * Late/Decline get no character lookup — showing characters there doesn't
  * make sense and would waste API quota.
@@ -29,10 +29,19 @@ export async function enrichRoster(roster: RaidRoster): Promise<EnrichedRoster> 
     };
 }
 
-async function enrichOne(signup: Signup, role: ButtonRole): Promise<EnrichedSignup> {
+/**
+ * Annotate characters for a single signup. The first character in the
+ * list (sorted by lastPlayedTs DESC, ilvl DESC) is the "main"; the rest
+ * are "alts". Any character whose cached role doesn't match the signup
+ * role is flagged as "offspec".
+ */
+async function enrichOne(signup: Signup, signupRole: RaidRole): Promise<EnrichedSignup> {
     try {
-        const chars = await getCharactersForRole(signup.userId, role);
-        return { signup, characters: chars };
+        const allChars = await getAllCharactersForUser(signup.userId);
+        if (allChars === null) return { signup, characters: null };
+
+        const annotated = annotateCharacters(allChars, signupRole);
+        return { signup, characters: annotated };
     } catch (err) {
         console.error(
             `[Enricher] Failed to resolve characters for ${signup.userName} (${signup.userId}):`,
@@ -40,4 +49,20 @@ async function enrichOne(signup: Signup, role: ButtonRole): Promise<EnrichedSign
         );
         return { signup, characters: null };
     }
+}
+
+/**
+ * Given a user's full character list (already sorted by recency + ilvl
+ * from the DB query) and the role they signed up for, produce annotated
+ * entries with main/alt/offspec flags.
+ */
+function annotateCharacters(
+    characters: CachedCharacter[],
+    signupRole: RaidRole
+): AnnotatedCharacter[] {
+    return characters.map((c, i) => ({
+        character: c,
+        isMain: i === 0,
+        isOffspec: c.role !== signupRole,
+    }));
 }

@@ -14,13 +14,22 @@ const EMBED_COLOR = 0x2b6cb0;
 const MAX_NOT_RESPONDED_NAMES = 25;
 
 /**
+ * A single character annotated with its relationship to the signup.
+ */
+export interface AnnotatedCharacter {
+    character: CachedCharacter;
+    isMain: boolean;   // top character by recent play + ilvl
+    isOffspec: boolean; // spec role doesn't match the signup role
+}
+
+/**
  * Per-user enrichment: the signup row plus any matching characters
  * pulled from the Battle.net cache. `characters === null` means the user
  * has not linked an account (render just their display name).
  */
 export interface EnrichedSignup {
     signup: Signup;
-    characters: CachedCharacter[] | null;
+    characters: AnnotatedCharacter[] | null;
 }
 
 export interface EnrichedRoster {
@@ -58,14 +67,21 @@ export function toEmptyEnriched(roster: RaidRoster): EnrichedRoster {
  *       ↳ faeyren | feral druid | 225 ilvl
  */
 function formatEnrichedSignup(entry: EnrichedSignup): string {
-    const head = `• ${entry.signup.userName}`;
+    const head = `• <@${entry.signup.userId}>`;
     if (!entry.characters || entry.characters.length === 0) return head;
 
-    const lines = entry.characters.map((c) => {
+    const lines = entry.characters.map((a) => {
+        const c = a.character;
         const spec = c.activeSpec ?? '??';
         const cls = c.className ?? '??';
         const ilvl = c.itemLevel != null ? `${c.itemLevel} ilvl` : 'no ilvl';
-        return `   ↳ ${c.characterName} | ${spec.toLowerCase()} ${cls} | ${ilvl}`;
+
+        const tags: string[] = [];
+        if (!a.isMain) tags.push('alt');
+        if (a.isOffspec) tags.push('offspec');
+        const suffix = tags.length > 0 ? ` · *${tags.join(' · ')}*` : '';
+
+        return `   ↳ ${c.characterName} | ${spec.toLowerCase()} ${cls} | ${ilvl}${suffix}`;
     });
     return [head, ...lines].join('\n');
 }

@@ -49,6 +49,6 @@ export async function computeNotResponded(
 
     return members
         .filter((m) => !respondedIds.has(m.id))
-        .map((m) => m.displayName)
+        .map((m) => `<@${m.id}>`)
         .sort((a, b) => a.localeCompare(b));
 }

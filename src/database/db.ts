@@ -97,6 +97,7 @@ export function initSchema(): void {
             activeSpec TEXT,
             itemLevel INTEGER,
             role TEXT,
+            lastPlayedTs INTEGER,
             fetchedAt INTEGER NOT NULL DEFAULT (strftime('%s','now')),
             PRIMARY KEY (discordUserId, realmSlug, characterName)
         );
@@ -113,6 +114,14 @@ export function initSchema(): void {
             'ALTER TABLE Raids ADD COLUMN raiderRoleId TEXT'
         );
         console.log('[DB] Migration: added Raids.raiderRoleId column.');
+    }
+
+    // Migration: add lastPlayedTs column to CharacterCache for main/alt
+    // detection. Existing rows get NULL which sorts them below freshly
+    // fetched characters — they'll fill in on the next cache refresh.
+    if (!columnExists('CharacterCache', 'lastPlayedTs')) {
+        db.prepare('ALTER TABLE CharacterCache ADD COLUMN lastPlayedTs INTEGER').run();
+        console.log('[DB] Migration: added CharacterCache.lastPlayedTs column.');
     }
 
     console.log('[DB] Schema ready.');

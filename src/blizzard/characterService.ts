@@ -8,6 +8,7 @@ import { RAID_LEVEL, specToRole, type RaidRoleSimple } from './constants';
 import {
     getCacheAgeSeconds,
     getCachedCharactersForRole,
+    getAllCachedCharacters,
     replaceCharacterCache,
     type CachedCharacter,
 } from '../database/battleNetRepository';
@@ -37,22 +38,61 @@ export async function getCharactersForRole(
     role: ButtonRole
 ): Promise<CachedCharacter[] | null> {
     const link = await getValidAccessToken(discordUserId);
-    if (!link) return null;
 
-    const age = getCacheAgeSeconds(discordUserId);
-    if (age == null || age > CACHE_TTL_SECONDS) {
-        try {
-            await refreshCharacterCache(discordUserId, link.accessToken);
-        } catch (err) {
-            console.error(
-                `[Blizzard] Failed to refresh character cache for ${discordUserId}:`,
-                err
-            );
-            // Fall through — if a stale cache exists we can still serve it.
+    // Even if the token refresh failed, we may still have cached data from
+    // a previous successful fetch. Only return null when there's no link
+    // AND no cache at all.
+    if (link) {
+        const age = getCacheAgeSeconds(discordUserId);
+        if (age == null || age > CACHE_TTL_SECONDS) {
+            try {
+                await refreshCharacterCache(discordUserId, link.accessToken);
+            } catch (err) {
+                console.error(
+                    `[Blizzard] Failed to refresh character cache for ${discordUserId}:`,
+                    err
+                );
+                // Fall through — stale cache is better than nothing.
+            }
         }
     }
 
-    return getCachedCharactersForRole(discordUserId, role, RAID_LEVEL);
+    // Serve from cache regardless of token state. The cache persists in
+    // SQLite and survives bot restarts, token expiries, and API outages.
+    const cached = getCachedCharactersForRole(discordUserId, role, RAID_LEVEL);
+    if (cached.length > 0) return cached;
+
+    // No cache and no valid link → user hasn't linked at all.
+    return link ? [] : null;
+}
+
+/**
+ * Return ALL raid-level characters for a user, using cache when warm and
+ * refreshing from the API when stale. Used by the enricher to show every
+ * character with main/alt/offspec annotations.
+ */
+export async function getAllCharactersForUser(
+    discordUserId: string
+): Promise<CachedCharacter[] | null> {
+    const link = await getValidAccessToken(discordUserId);
+
+    if (link) {
+        const age = getCacheAgeSeconds(discordUserId);
+        if (age == null || age > CACHE_TTL_SECONDS) {
+            try {
+                await refreshCharacterCache(discordUserId, link.accessToken);
+            } catch (err) {
+                console.error(
+                    `[Blizzard] Failed to refresh character cache for ${discordUserId}:`,
+                    err
+                );
+            }
+        }
+    }
+
+    const cached = getAllCachedCharacters(discordUserId, RAID_LEVEL);
+    if (cached.length > 0) return cached;
+    return link ? [] : null;
 }
 
 /**
@@ -90,7 +130,18 @@ async function refreshCharacterCache(
             activeSpec: d.activeSpecName,
             itemLevel: d.itemLevel,
             role: specToRole(d.activeSpecName),
+            lastPlayedTs: d.lastPlayedTimestamp ?? null,
         }));
+
+    // Guard: don't nuke existing cached data when the API returns nothing.
+    // This protects against Blizzard outages or transient errors that
+    // return a valid-but-empty response.
+    if (rows.length === 0) {
+        console.warn(
+            `[Blizzard] API returned 0 raid-level characters for ${discordUserId} — keeping existing cache.`
+        );
+        return;
+    }
 
     replaceCharacterCache(discordUserId, rows);
     console.log(

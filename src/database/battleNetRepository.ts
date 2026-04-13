@@ -28,6 +28,7 @@ export interface CachedCharacter {
     activeSpec: string | null;
     itemLevel: number | null;
     role: string | null; // 'tank' | 'healer' | 'dps' | null
+    lastPlayedTs: number | null; // unix ms from Blizzard API
     fetchedAt: number;
 }
 
@@ -86,8 +87,8 @@ export function replaceCharacterCache(
     const del = db.prepare('DELETE FROM CharacterCache WHERE discordUserId = ?');
     const ins = db.prepare(
         `
-        INSERT INTO CharacterCache (discordUserId, realmSlug, characterName, level, className, activeSpec, itemLevel, role, fetchedAt)
-        VALUES (@discordUserId, @realmSlug, @characterName, @level, @className, @activeSpec, @itemLevel, @role, strftime('%s','now'))
+        INSERT INTO CharacterCache (discordUserId, realmSlug, characterName, level, className, activeSpec, itemLevel, role, lastPlayedTs, fetchedAt)
+        VALUES (@discordUserId, @realmSlug, @characterName, @level, @className, @activeSpec, @itemLevel, @role, @lastPlayedTs, strftime('%s','now'))
     `
     );
     const tx = db.transaction(
@@ -113,6 +114,24 @@ export function getCachedCharactersForRole(
              ORDER BY itemLevel DESC, characterName ASC`
         )
         .all(discordUserId, role, maxLevel) as CachedCharacter[];
+}
+
+/**
+ * Return ALL cached characters for a user at the raid level, regardless
+ * of role. Sorted by lastPlayedTs DESC, then itemLevel DESC so the
+ * "main" character naturally lands first.
+ */
+export function getAllCachedCharacters(
+    discordUserId: string,
+    maxLevel: number
+): CachedCharacter[] {
+    return db
+        .prepare(
+            `SELECT * FROM CharacterCache
+             WHERE discordUserId = ? AND level = ?
+             ORDER BY lastPlayedTs DESC, itemLevel DESC, characterName ASC`
+        )
+        .all(discordUserId, maxLevel) as CachedCharacter[];
 }
 
 export function getCacheAgeSeconds(discordUserId: string): number | null {
