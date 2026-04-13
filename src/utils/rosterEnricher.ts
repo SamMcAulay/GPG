@@ -1,6 +1,8 @@
 import type { RaidRoster, Signup, RaidRole } from '../database/raidRepository';
 import type { EnrichedRoster, EnrichedSignup, AnnotatedCharacter } from './raidEmbed';
 import { getAllCharactersForUser } from '../blizzard/characterService';
+import { specToRole, getSpecForRole } from '../blizzard/constants';
+import type { RaidRoleSimple } from '../blizzard/constants';
 import type { CachedCharacter } from '../database/battleNetRepository';
 
 /**
@@ -30,17 +32,22 @@ export async function enrichRoster(roster: RaidRoster): Promise<EnrichedRoster> 
 }
 
 /**
- * Annotate characters for a single signup. The first character in the
- * list (sorted by lastPlayedTs DESC, ilvl DESC) is the "main"; the rest
- * are "alts". Any character whose cached role doesn't match the signup
- * role is flagged as "offspec".
+ * Annotate characters for a single signup:
+ *
+ * 1. Filter to only characters whose CLASS can fill the signup role
+ *    (e.g. a Mage is excluded from a Tank signup).
+ * 2. For each kept character, determine the display spec:
+ *    - If the character's current spec already matches the role → use it.
+ *    - Otherwise → use the spec the class WOULD use for that role (offspec).
+ * 3. Sort: on-spec first, then by lastPlayedTs + ilvl.
+ * 4. First character = main, rest = alts.
  */
 async function enrichOne(signup: Signup, signupRole: RaidRole): Promise<EnrichedSignup> {
     try {
         const allChars = await getAllCharactersForUser(signup.userId);
         if (allChars === null) return { signup, characters: null };
 
-        const annotated = annotateCharacters(allChars, signupRole);
+        const annotated = annotateCharacters(allChars, signupRole as RaidRoleSimple);
         return { signup, characters: annotated };
     } catch (err) {
         console.error(
@@ -51,18 +58,54 @@ async function enrichOne(signup: Signup, signupRole: RaidRole): Promise<Enriched
     }
 }
 
-/**
- * Given a user's full character list (already sorted by recency + ilvl
- * from the DB query) and the role they signed up for, produce annotated
- * entries with main/alt/offspec flags.
- */
 function annotateCharacters(
     characters: CachedCharacter[],
-    signupRole: RaidRole
+    signupRole: RaidRoleSimple
 ): AnnotatedCharacter[] {
-    return characters.map((c, i) => ({
-        character: c,
+    const candidates: Array<{
+        character: CachedCharacter;
+        isOffspec: boolean;
+        displaySpec: string;
+    }> = [];
+
+    for (const c of characters) {
+        const currentRole = specToRole(c.activeSpec);
+
+        if (currentRole === signupRole) {
+            // Current spec matches the signup role — on-spec, show as-is.
+            candidates.push({
+                character: c,
+                isOffspec: false,
+                displaySpec: c.activeSpec ?? '??',
+            });
+        } else {
+            // Check if this class CAN fill the role via a different spec.
+            const targetSpec = getSpecForRole(c.className, signupRole);
+            if (targetSpec) {
+                candidates.push({
+                    character: c,
+                    isOffspec: true,
+                    displaySpec: targetSpec,
+                });
+            }
+            // If targetSpec is null, this class can't fill the role — skip it.
+        }
+    }
+
+    // Sort: on-spec first, then by recency + ilvl (already pre-sorted from DB,
+    // but the on-spec/offspec split may reorder).
+    candidates.sort((a, b) => {
+        if (a.isOffspec !== b.isOffspec) return a.isOffspec ? 1 : -1;
+        const tsA = a.character.lastPlayedTs ?? 0;
+        const tsB = b.character.lastPlayedTs ?? 0;
+        if (tsB !== tsA) return tsB - tsA;
+        return (b.character.itemLevel ?? 0) - (a.character.itemLevel ?? 0);
+    });
+
+    return candidates.map((entry, i) => ({
+        character: entry.character,
         isMain: i === 0,
-        isOffspec: c.role !== signupRole,
+        isOffspec: entry.isOffspec,
+        displaySpec: entry.displaySpec,
     }));
 }

@@ -18,8 +18,9 @@ const MAX_NOT_RESPONDED_NAMES = 25;
  */
 export interface AnnotatedCharacter {
     character: CachedCharacter;
-    isMain: boolean;   // top character by recent play + ilvl
+    isMain: boolean;    // top character by recent play + ilvl
     isOffspec: boolean; // spec role doesn't match the signup role
+    displaySpec: string; // the spec to show (actual spec when on-spec, target spec when offspec)
 }
 
 /**
@@ -72,7 +73,7 @@ function formatEnrichedSignup(entry: EnrichedSignup): string {
 
     const lines = entry.characters.map((a) => {
         const c = a.character;
-        const spec = c.activeSpec ?? '??';
+        const spec = a.displaySpec;
         const cls = c.className ?? '??';
         const ilvl = c.itemLevel != null ? `${c.itemLevel} ilvl` : 'no ilvl';
 
