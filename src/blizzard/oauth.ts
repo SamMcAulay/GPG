@@ -190,4 +190,19 @@ export async function getValidAccessToken(
     }
 }
 
+/**
+ * Get an access token using the client_credentials grant. This does not
+ * require any user interaction — it authenticates the *application* and
+ * allows access to public/community endpoints (e.g. character profiles
+ * by name+realm). The token is short-lived (~24h) and not cached here;
+ * callers should cache if needed.
+ */
+export async function getClientCredentialToken(): Promise<string> {
+    const body = new URLSearchParams({
+        grant_type: 'client_credentials',
+    });
+    const result = await postToken(body);
+    return result.access_token;
+}
+
 export const _currentRegion = REGION;
