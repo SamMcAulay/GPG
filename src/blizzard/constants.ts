@@ -111,42 +111,41 @@ export function specToRole(specName: string | null | undefined): RaidRoleSimple 
 }
 
 /**
- * Class → role → spec mapping. For each WoW class, maps which spec
- * would be used to fill a given raid role. Used to display the correct
- * offspec label (e.g. "Blood Death Knight" when a DK signs up as tank
- * but is currently specced Unholy).
+ * Class → role → specs mapping. For each WoW class, lists ALL specs
+ * that can fill a given raid role. Used to display the correct offspec
+ * label(s) when a character's current spec doesn't match the signup role.
  *
- * When a class has multiple specs for one role (e.g. DK has Frost and
- * Unholy for DPS), one is chosen as the default. The actual current spec
- * takes priority when it already matches the role.
+ * When there's only one spec for a role, the display is simple
+ * (e.g. "blood Death Knight"). When there are multiple (e.g. Druid DPS
+ * has Balance and Feral), the display shows both ("balance/feral Druid").
  *
  * Keys are lowercased for case-insensitive lookup.
  */
-const CLASS_ROLE_SPEC: Record<string, Partial<Record<RaidRoleSimple, string>>> = {
-    'death knight': { tank: 'Blood', dps: 'Unholy' },
-    'demon hunter': { tank: 'Vengeance', dps: 'Havoc' },
-    'druid': { tank: 'Guardian', healer: 'Restoration', dps: 'Balance' },
-    'evoker': { healer: 'Preservation', dps: 'Devastation' },
-    'hunter': { dps: 'Marksmanship' },
-    'mage': { dps: 'Frost' },
-    'monk': { tank: 'Brewmaster', healer: 'Mistweaver', dps: 'Windwalker' },
-    'paladin': { tank: 'Protection', healer: 'Holy', dps: 'Retribution' },
-    'priest': { healer: 'Discipline', dps: 'Shadow' },
-    'rogue': { dps: 'Assassination' },
-    'shaman': { healer: 'Restoration', dps: 'Elemental' },
-    'warlock': { dps: 'Affliction' },
-    'warrior': { tank: 'Protection', dps: 'Arms' },
+const CLASS_ROLE_SPECS: Record<string, Partial<Record<RaidRoleSimple, string[]>>> = {
+    'death knight': { tank: ['Blood'], dps: ['Frost', 'Unholy'] },
+    'demon hunter': { tank: ['Vengeance'], dps: ['Havoc'] },
+    'druid': { tank: ['Guardian'], healer: ['Restoration'], dps: ['Balance', 'Feral'] },
+    'evoker': { healer: ['Preservation'], dps: ['Devastation', 'Augmentation'] },
+    'hunter': { dps: ['Beast Mastery', 'Marksmanship', 'Survival'] },
+    'mage': { dps: ['Arcane', 'Fire', 'Frost'] },
+    'monk': { tank: ['Brewmaster'], healer: ['Mistweaver'], dps: ['Windwalker'] },
+    'paladin': { tank: ['Protection'], healer: ['Holy'], dps: ['Retribution'] },
+    'priest': { healer: ['Discipline', 'Holy'], dps: ['Shadow'] },
+    'rogue': { dps: ['Assassination', 'Outlaw', 'Subtlety'] },
+    'shaman': { healer: ['Restoration'], dps: ['Elemental', 'Enhancement'] },
+    'warlock': { dps: ['Affliction', 'Demonology', 'Destruction'] },
+    'warrior': { tank: ['Protection'], dps: ['Arms', 'Fury'] },
 };
 
 /**
- * Given a class name and a desired role, return the spec that class would
- * use to fill that role. Returns null if the class cannot fill the role
- * (e.g. Mage cannot tank).
+ * Given a class name and a desired role, return all specs that class
+ * could use to fill that role. Returns an empty array if the class
+ * cannot fill the role (e.g. Mage cannot tank).
  */
-export function getSpecForRole(
+export function getSpecsForRole(
     className: string | null | undefined,
     role: RaidRoleSimple
-): string | null {
-    if (!className) return null;
-    return CLASS_ROLE_SPEC[className.toLowerCase()]?.[role] ?? null;
+): string[] {
+    if (!className) return [];
+    return CLASS_ROLE_SPECS[className.toLowerCase()]?.[role] ?? [];
 }

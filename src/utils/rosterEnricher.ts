@@ -1,9 +1,12 @@
 import type { RaidRoster, Signup, RaidRole } from '../database/raidRepository';
 import type { EnrichedRoster, EnrichedSignup, AnnotatedCharacter } from './raidEmbed';
 import { getAllCharactersForUser } from '../blizzard/characterService';
-import { specToRole, getSpecForRole } from '../blizzard/constants';
+import { specToRole, getSpecsForRole } from '../blizzard/constants';
 import type { RaidRoleSimple } from '../blizzard/constants';
 import type { CachedCharacter } from '../database/battleNetRepository';
+
+/** Characters played within this window count as "recently active". */
+const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /**
  * Look up ALL characters for every signed-up user and return an enriched
@@ -34,12 +37,13 @@ export async function enrichRoster(roster: RaidRoster): Promise<EnrichedRoster> 
 /**
  * Annotate characters for a single signup:
  *
- * 1. Filter to only characters whose CLASS can fill the signup role
- *    (e.g. a Mage is excluded from a Tank signup).
+ * 1. Filter to only characters whose CLASS can fill the signup role.
  * 2. For each kept character, determine the display spec:
- *    - If the character's current spec already matches the role → use it.
- *    - Otherwise → use the spec the class WOULD use for that role (offspec).
- * 3. Sort: on-spec first, then by lastPlayedTs + ilvl.
+ *    - On-spec: current spec matches the role → show current spec.
+ *    - Offspec: current spec doesn't match → show all viable specs for
+ *      the role joined with "/" (e.g. "balance/feral Druid").
+ * 3. Sort by ilvl (primary), with recent playtime (last 30 days) as
+ *    tiebreaker. On-spec characters sort above offspec.
  * 4. First character = main, rest = alts.
  */
 async function enrichOne(signup: Signup, signupRole: RaidRole): Promise<EnrichedSignup> {
@@ -62,6 +66,7 @@ function annotateCharacters(
     characters: CachedCharacter[],
     signupRole: RaidRoleSimple
 ): AnnotatedCharacter[] {
+    const now = Date.now();
     const candidates: Array<{
         character: CachedCharacter;
         isOffspec: boolean;
@@ -80,26 +85,35 @@ function annotateCharacters(
             });
         } else {
             // Check if this class CAN fill the role via a different spec.
-            const targetSpec = getSpecForRole(c.className, signupRole);
-            if (targetSpec) {
-                candidates.push({
-                    character: c,
-                    isOffspec: true,
-                    displaySpec: targetSpec,
-                });
-            }
-            // If targetSpec is null, this class can't fill the role — skip it.
+            const viableSpecs = getSpecsForRole(c.className, signupRole);
+            if (viableSpecs.length === 0) continue; // class can't fill this role
+
+            candidates.push({
+                character: c,
+                isOffspec: true,
+                displaySpec: viableSpecs.join('/'),
+            });
         }
     }
 
-    // Sort: on-spec first, then by recency + ilvl (already pre-sorted from DB,
-    // but the on-spec/offspec split may reorder).
+    // Sort: on-spec above offspec, then ilvl DESC (primary), then recent
+    // playtime as tiebreaker (characters active in last 30 days sort above
+    // those that haven't been touched).
     candidates.sort((a, b) => {
+        // On-spec always beats offspec
         if (a.isOffspec !== b.isOffspec) return a.isOffspec ? 1 : -1;
-        const tsA = a.character.lastPlayedTs ?? 0;
-        const tsB = b.character.lastPlayedTs ?? 0;
-        if (tsB !== tsA) return tsB - tsA;
-        return (b.character.itemLevel ?? 0) - (a.character.itemLevel ?? 0);
+
+        // Primary: ilvl
+        const ilvlDiff = (b.character.itemLevel ?? 0) - (a.character.itemLevel ?? 0);
+        if (ilvlDiff !== 0) return ilvlDiff;
+
+        // Tiebreaker: recently played (last 30 days) beats not
+        const aRecent = (a.character.lastPlayedTs ?? 0) > now - RECENT_WINDOW_MS;
+        const bRecent = (b.character.lastPlayedTs ?? 0) > now - RECENT_WINDOW_MS;
+        if (aRecent !== bRecent) return aRecent ? -1 : 1;
+
+        // Final tiebreaker: more recent play first
+        return (b.character.lastPlayedTs ?? 0) - (a.character.lastPlayedTs ?? 0);
     });
 
     return candidates.map((entry, i) => ({

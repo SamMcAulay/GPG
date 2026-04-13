@@ -129,7 +129,7 @@ export function getAllCachedCharacters(
         .prepare(
             `SELECT * FROM CharacterCache
              WHERE discordUserId = ? AND level = ?
-             ORDER BY lastPlayedTs DESC, itemLevel DESC, characterName ASC`
+             ORDER BY itemLevel DESC, lastPlayedTs DESC, characterName ASC`
         )
         .all(discordUserId, maxLevel) as CachedCharacter[];
 }
