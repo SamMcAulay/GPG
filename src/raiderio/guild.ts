@@ -20,8 +20,14 @@ export interface RaiderIoCharacter {
     class: string;
     activeSpec: string;
     profileUrl: string;
-    mythicPlusScore: number;
-    mythicPlusRunCount: number;
+    /** Overall M+ score (sum of top scores across roles). */
+    scoreAll: number;
+    /** DPS-role score (from keys played as DPS). */
+    scoreDps: number;
+    /** Healer-role score. */
+    scoreHealer: number;
+    /** Tank-role score. */
+    scoreTank: number;
 }
 
 interface RawMember {
@@ -52,10 +58,13 @@ interface CharacterProfileResponse {
     profile_url: string;
     mythic_plus_scores_by_season?: Array<{
         season: string;
-        scores: { all: number };
+        scores: {
+            all: number;
+            dps: number;
+            healer: number;
+            tank: number;
+        };
     }>;
-    mythic_plus_best_runs?: Array<{ mythic_level: number }>;
-    mythic_plus_recent_runs?: Array<{ mythic_level: number }>;
 }
 
 /**
@@ -91,8 +100,10 @@ async function fetchCharacterScore(
     realm: string,
     region: string
 ): Promise<{
-    score: number;
-    runCount: number;
+    scoreAll: number;
+    scoreDps: number;
+    scoreHealer: number;
+    scoreTank: number;
     spec: string;
     className: string;
     profileUrl: string;
@@ -101,7 +112,7 @@ async function fetchCharacterScore(
         region,
         realm,
         name: name.toLowerCase(),
-        fields: 'mythic_plus_scores_by_season:current,mythic_plus_best_runs,mythic_plus_recent_runs',
+        fields: 'mythic_plus_scores_by_season:current',
     });
 
     try {
@@ -109,15 +120,13 @@ async function fetchCharacterScore(
         if (!res.ok) return null;
 
         const data = (await res.json()) as CharacterProfileResponse;
-        const seasons = data.mythic_plus_scores_by_season ?? [];
-        const score = seasons[0]?.scores?.all ?? 0;
-        // best_runs = top timed per dungeon, recent_runs = last 10 completed
-        const bestCount = data.mythic_plus_best_runs?.length ?? 0;
-        const recentCount = data.mythic_plus_recent_runs?.length ?? 0;
+        const scores = data.mythic_plus_scores_by_season?.[0]?.scores;
 
         return {
-            score,
-            runCount: Math.max(bestCount, recentCount),
+            scoreAll: scores?.all ?? 0,
+            scoreDps: scores?.dps ?? 0,
+            scoreHealer: scores?.healer ?? 0,
+            scoreTank: scores?.tank ?? 0,
             spec: data.active_spec_name,
             className: data.class,
             profileUrl: data.profile_url,
@@ -176,7 +185,7 @@ export async function fetchGuildMythicPlus(
 
     const characters: RaiderIoCharacter[] = [];
     for (const r of results) {
-        if (!r || r.score <= 0) continue;
+        if (!r || r.scoreAll <= 0) continue;
 
         characters.push({
             name: r.member.character.name,
@@ -184,12 +193,14 @@ export async function fetchGuildMythicPlus(
             class: r.className,
             activeSpec: r.spec,
             profileUrl: r.profileUrl,
-            mythicPlusScore: r.score,
-            mythicPlusRunCount: r.runCount,
+            scoreAll: r.scoreAll,
+            scoreDps: r.scoreDps,
+            scoreHealer: r.scoreHealer,
+            scoreTank: r.scoreTank,
         });
     }
 
-    characters.sort((a, b) => b.mythicPlusScore - a.mythicPlusScore);
+    characters.sort((a, b) => b.scoreAll - a.scoreAll);
 
     console.log(
         `[RaiderIO] Found ${characters.length} characters with M+ scores for ${guildName}-${realm}`

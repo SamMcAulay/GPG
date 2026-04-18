@@ -24,15 +24,44 @@ const CLASS_EMOJI: Record<string, string> = {
 /** Medal emojis for top 3 positions. */
 const RANK_MEDAL = ['🥇', '🥈', '🥉'];
 
-/**
- * Max characters to show on the leaderboard. Discord embed field values
- * cap at 1024 chars and we use description which caps at 4096, so we
- * have room for more than the raid embed, but we keep it reasonable.
- */
-const MAX_ENTRIES = 20;
+/** Max entries shown per role section. */
+const MAX_PER_ROLE = 10;
+
+type Role = 'tank' | 'healer' | 'dps';
 
 function formatScore(score: number): string {
     return score.toFixed(1);
+}
+
+function getRoleScore(c: RaiderIoCharacter, role: Role): number {
+    if (role === 'tank') return c.scoreTank;
+    if (role === 'healer') return c.scoreHealer;
+    return c.scoreDps;
+}
+
+/**
+ * Build a single role section from the characters that have a non-zero
+ * score in that role, sorted by that role's score descending.
+ */
+function formatRoleSection(
+    characters: RaiderIoCharacter[],
+    role: Role
+): string {
+    const withScore = characters
+        .filter((c) => getRoleScore(c, role) > 0)
+        .sort((a, b) => getRoleScore(b, role) - getRoleScore(a, role))
+        .slice(0, MAX_PER_ROLE);
+
+    if (withScore.length === 0) return '*No entries yet.*';
+
+    const lines = withScore.map((c, i) => {
+        const rank = RANK_MEDAL[i] ?? `**${i + 1}.**`;
+        const classEmoji = CLASS_EMOJI[c.class] ?? '❓';
+        const score = formatScore(getRoleScore(c, role));
+        return `${rank} **[${c.name}](${c.profileUrl})** \`${score}\`  ${classEmoji} ${c.activeSpec}`;
+    });
+
+    return lines.join('\n');
 }
 
 /**
@@ -42,46 +71,43 @@ export function buildLeaderboardEmbed(
     leaderboard: Leaderboard,
     characters: RaiderIoCharacter[]
 ): EmbedBuilder {
-    const top = characters.slice(0, MAX_ENTRIES);
-
-    const lines = top.map((c, i) => {
-        const rank = RANK_MEDAL[i] ?? `**${i + 1}.**`;
-        const classEmoji = CLASS_EMOJI[c.class] ?? '❓';
-        const score = formatScore(c.mythicPlusScore);
-        const runs =
-            c.mythicPlusRunCount > 0 ? ` · ${c.mythicPlusRunCount} timed` : '';
-
-        return `${rank} **[${c.name}](${c.profileUrl})** — ${score}\n` +
-            `${' '.repeat(4)}${classEmoji} ${c.activeSpec} ${c.class}${runs}`;
-    });
-
-    const description =
-        lines.length > 0
-            ? lines.join('\n')
-            : '*No characters with M+ scores found for this guild.*';
-
-    const totalChars = characters.length;
-    const remaining = totalChars - top.length;
-    const footer =
-        remaining > 0
-            ? `Showing top ${top.length} of ${totalChars} · Updates every 10 min`
-            : `${totalChars} characters · Updates every 10 min`;
-
     const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle(
-            `🏆 M+ Leaderboard — ${leaderboard.wowGuildName}`
-        )
-        .setDescription(description)
-        .setFooter({ text: footer })
-        .setTimestamp(new Date());
+        .setTitle(`🏆 M+ Leaderboard — ${leaderboard.wowGuildName}`)
+        .setDescription(
+            `*${leaderboard.realmSlug} · ${leaderboard.region.toUpperCase()}*`
+        );
 
-    // Add guild/realm info as a subtle field
-    embed.addFields({
-        name: '\u200b',
-        value: `*${leaderboard.realmSlug} · ${leaderboard.region.toUpperCase()}*`,
-        inline: false,
-    });
+    if (characters.length === 0) {
+        embed.addFields({
+            name: '\u200b',
+            value: '*No characters with M+ scores found for this guild.*',
+        });
+    } else {
+        embed.addFields(
+            {
+                name: '🛡️ Tanks',
+                value: formatRoleSection(characters, 'tank'),
+                inline: false,
+            },
+            {
+                name: '💉 Healers',
+                value: formatRoleSection(characters, 'healer'),
+                inline: false,
+            },
+            {
+                name: '⚔️ DPS',
+                value: formatRoleSection(characters, 'dps'),
+                inline: false,
+            }
+        );
+    }
+
+    embed
+        .setFooter({
+            text: `${characters.length} characters · Updates every 10 min`,
+        })
+        .setTimestamp(new Date());
 
     return embed;
 }
