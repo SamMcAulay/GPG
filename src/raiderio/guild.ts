@@ -10,9 +10,17 @@
  * cap the total number of members we query.
  */
 
+import { CLASS_SPECS, type SpecRole } from './specs';
+
 const BASE_URL = 'https://raider.io/api/v1';
 const MAX_MEMBERS_TO_QUERY = 200;
 const CONCURRENCY = 10;
+
+export interface SpecScore {
+    spec: string;
+    role: SpecRole;
+    score: number;
+}
 
 export interface RaiderIoCharacter {
     name: string;
@@ -20,24 +28,18 @@ export interface RaiderIoCharacter {
     class: string;
     activeSpec: string;
     profileUrl: string;
-    /** Overall M+ score (sum of top scores across roles). */
+    /** Overall M+ score (Raider.IO's "all" field). */
     scoreAll: number;
-    /** DPS-role score (from keys played as DPS). */
-    scoreDps: number;
-    /** Healer-role score. */
-    scoreHealer: number;
-    /** Tank-role score. */
-    scoreTank: number;
+    /** Per-spec scores, sorted by score descending. Only includes specs with non-zero score. */
+    specScores: SpecScore[];
 }
 
 interface RawMember {
     rank: number;
     character: {
         name: string;
-        race: string;
         class: string;
         active_spec_name: string;
-        active_spec_role: string;
         region: string;
         realm: string;
         profile_url: string;
@@ -45,9 +47,6 @@ interface RawMember {
 }
 
 interface GuildProfileResponse {
-    name: string;
-    realm: string;
-    region: string;
     members: RawMember[];
 }
 
@@ -58,12 +57,7 @@ interface CharacterProfileResponse {
     profile_url: string;
     mythic_plus_scores_by_season?: Array<{
         season: string;
-        scores: {
-            all: number;
-            dps: number;
-            healer: number;
-            tank: number;
-        };
+        scores: RawScores;
     }>;
 }
 
@@ -92,18 +86,48 @@ async function batchRun<T>(
     return results;
 }
 
+interface RawScores {
+    all: number;
+    spec_0?: number;
+    spec_1?: number;
+    spec_2?: number;
+    spec_3?: number;
+}
+
 /**
- * Fetch a single character's M+ data.
+ * Resolve Raider.IO's spec_0/1/2/3 scores to named specs using the
+ * class's canonical spec order. Returns specs with non-zero score,
+ * sorted descending.
  */
+function resolveSpecScores(className: string, scores: RawScores): SpecScore[] {
+    const specs = CLASS_SPECS[className];
+    if (!specs) return [];
+
+    const raw = [
+        scores.spec_0 ?? 0,
+        scores.spec_1 ?? 0,
+        scores.spec_2 ?? 0,
+        scores.spec_3 ?? 0,
+    ];
+
+    const result: SpecScore[] = [];
+    for (let i = 0; i < specs.length; i++) {
+        if (raw[i] > 0) {
+            result.push({ spec: specs[i].name, role: specs[i].role, score: raw[i] });
+        }
+    }
+
+    result.sort((a, b) => b.score - a.score);
+    return result;
+}
+
 async function fetchCharacterScore(
     name: string,
     realm: string,
     region: string
 ): Promise<{
     scoreAll: number;
-    scoreDps: number;
-    scoreHealer: number;
-    scoreTank: number;
+    specScores: SpecScore[];
     spec: string;
     className: string;
     profileUrl: string;
@@ -124,9 +148,7 @@ async function fetchCharacterScore(
 
         return {
             scoreAll: scores?.all ?? 0,
-            scoreDps: scores?.dps ?? 0,
-            scoreHealer: scores?.healer ?? 0,
-            scoreTank: scores?.tank ?? 0,
+            specScores: scores ? resolveSpecScores(data.class, scores) : [],
             spec: data.active_spec_name,
             className: data.class,
             profileUrl: data.profile_url,
@@ -139,8 +161,8 @@ async function fetchCharacterScore(
 /**
  * Fetch guild members with their M+ data from Raider.IO.
  *
- * Returns characters sorted by M+ score descending. Characters with
- * zero score are excluded.
+ * Returns characters sorted by overall M+ score descending. Characters
+ * with zero score are excluded.
  */
 export async function fetchGuildMythicPlus(
     guildName: string,
@@ -173,12 +195,9 @@ export async function fetchGuildMythicPlus(
         `[RaiderIO] Fetching M+ scores for ${members.length} members (of ${data.members.length} total)...`
     );
 
-    // Batch-fetch character profiles.
     const tasks = members.map((m) => () =>
         fetchCharacterScore(m.character.name, m.character.realm, region)
-            .then((result) =>
-                result ? { member: m, ...result } : null
-            )
+            .then((result) => (result ? { member: m, ...result } : null))
     );
 
     const results = await batchRun(tasks, CONCURRENCY);
@@ -194,9 +213,7 @@ export async function fetchGuildMythicPlus(
             activeSpec: r.spec,
             profileUrl: r.profileUrl,
             scoreAll: r.scoreAll,
-            scoreDps: r.scoreDps,
-            scoreHealer: r.scoreHealer,
-            scoreTank: r.scoreTank,
+            specScores: r.specScores,
         });
     }
 
