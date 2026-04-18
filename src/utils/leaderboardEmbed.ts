@@ -24,14 +24,16 @@ const MAX_ENTRIES = 15;
 function formatEntry(c: RaiderIoCharacter, i: number): string {
     const rank = RANK_MEDAL[i] ?? `**${i + 1}.**`;
 
+    const className = c.class.toLowerCase();
+
     // If the class isn't in our spec map (shouldn't happen for known classes),
     // fall back to the active spec name with the overall score.
     if (c.specScores.length === 0) {
-        return `${rank} **[${c.name}](${c.profileUrl})** \`${c.scoreAll.toFixed(1)}\` — ${c.activeSpec.toLowerCase()}`;
+        return `${rank} **[${c.name}](${c.profileUrl})** \`${c.scoreAll.toFixed(1)}\` — ${c.activeSpec.toLowerCase()} ${className}`;
     }
 
     const [primary, ...rest] = c.specScores;
-    const primaryLine = `${rank} **[${c.name}](${c.profileUrl})** \`${primary.score.toFixed(1)}\` — ${primary.spec.toLowerCase()} ${ROLE_EMOJI[primary.role]}`;
+    const primaryLine = `${rank} **[${c.name}](${c.profileUrl})** \`${primary.score.toFixed(1)}\` — ${primary.spec.toLowerCase()} ${className} ${ROLE_EMOJI[primary.role]}`;
 
     if (rest.length === 0) return primaryLine;
 
