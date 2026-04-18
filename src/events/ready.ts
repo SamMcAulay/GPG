@@ -1,5 +1,6 @@
 import { Client, Events, REST, Routes } from 'discord.js';
 import { commands } from '../commands';
+import { restoreAllLeaderboards } from '../services/leaderboardUpdater';
 
 export const name = Events.ClientReady;
 export const once = true;
@@ -88,4 +89,7 @@ export async function execute(client: Client<true>): Promise<void> {
             `Connected to ${client.guilds.cache.size} guild(s).`
     );
     await registerSlashCommands(client);
+
+    // Restore any persisted M+ leaderboard update loops.
+    restoreAllLeaderboards(client);
 }

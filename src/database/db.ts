@@ -103,6 +103,20 @@ export function initSchema(): void {
         );
 
         CREATE INDEX IF NOT EXISTS idx_charcache_user ON CharacterCache(discordUserId);
+
+        CREATE TABLE IF NOT EXISTS Leaderboards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            messageId TEXT UNIQUE NOT NULL,
+            channelId TEXT NOT NULL,
+            guildId TEXT NOT NULL,
+            wowGuildName TEXT NOT NULL,
+            realmSlug TEXT NOT NULL,
+            region TEXT NOT NULL,
+            createdBy TEXT NOT NULL,
+            createdAt INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_leaderboards_guild ON Leaderboards(guildId);
     `;
     (db as unknown as SqliteRunner).exec(schemaSql);
 
