@@ -9,7 +9,7 @@
  * leaderboard row is removed from the database and the loop stops.
  */
 
-import type { Client } from 'discord.js';
+import { DiscordAPIError, type Client } from 'discord.js';
 import {
     getAllLeaderboards,
     deleteLeaderboard,
@@ -17,6 +17,20 @@ import {
 } from '../database/leaderboardRepository';
 import { fetchGuildMythicPlus } from '../raiderio/guild';
 import { buildLeaderboardEmbed } from '../utils/leaderboardEmbed';
+
+/**
+ * Discord returns distinct error codes for "this truly no longer exists"
+ * vs "you lack permission to see it". Only the former means we should
+ * remove our DB row; the latter is recoverable (fix perms in Discord)
+ * and deleting would silently destroy user data.
+ *
+ *   10003 Unknown Channel, 10008 Unknown Message  → gone
+ *   50001 Missing Access, 50013 Missing Permissions → recoverable
+ */
+function isTrulyGoneError(err: unknown): boolean {
+    if (!(err instanceof DiscordAPIError)) return false;
+    return err.code === 10003 || err.code === 10008;
+}
 
 const UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -32,22 +46,15 @@ async function refreshLeaderboard(
     lb: Leaderboard
 ): Promise<boolean> {
     try {
-        const channel = await client.channels.fetch(lb.channelId).catch(() => null);
+        const channel = await client.channels.fetch(lb.channelId);
         if (!channel || !channel.isTextBased()) {
             console.warn(
-                `[Leaderboard] Channel ${lb.channelId} not found or not text-based, removing leaderboard ${lb.id}`
+                `[Leaderboard] Channel ${lb.channelId} is not text-based for leaderboard ${lb.id}; keeping row.`
             );
-            return false;
+            return true;
         }
 
-        // Fetch the message — if deleted, clean up.
-        const message = await channel.messages.fetch(lb.messageId).catch(() => null);
-        if (!message) {
-            console.warn(
-                `[Leaderboard] Message ${lb.messageId} not found, removing leaderboard ${lb.id}`
-            );
-            return false;
-        }
+        const message = await channel.messages.fetch(lb.messageId);
 
         const characters = await fetchGuildMythicPlus(
             lb.wowGuildName,
@@ -63,9 +70,16 @@ async function refreshLeaderboard(
         );
         return true;
     } catch (err) {
+        if (isTrulyGoneError(err)) {
+            console.warn(
+                `[Leaderboard] Leaderboard ${lb.id} channel/message returned 10003/10008 (gone) — removing row.`
+            );
+            return false;
+        }
+        // Permission errors (50001/50013), rate limits, network blips all
+        // land here. Keep the row so a fix in Discord (grant perms, etc.)
+        // automatically restores updates on the next tick.
         console.error(`[Leaderboard] Failed to refresh leaderboard ${lb.id}:`, err);
-        // Don't remove on transient errors (API rate limits, network blips).
-        // Only remove if we confirmed the message/channel is gone (returned false above).
         return true;
     }
 }

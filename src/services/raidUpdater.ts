@@ -13,11 +13,32 @@
  * place. Re-enriching naturally busts the per-user character cache.
  */
 
-import type { Client } from 'discord.js';
+import { DiscordAPIError, type Client } from 'discord.js';
 import { getRaidsCreatedSince, getRoster, type Raid } from '../database/raidRepository';
 import { buildRaidEmbed, buildRaidButtons } from '../utils/raidEmbed';
 import { computeNotResponded } from '../utils/raidHelpers';
 import { enrichRoster } from '../utils/rosterEnricher';
+
+/**
+ * Summarise a Discord API error so the operator can tell at a glance
+ * whether the raid post is truly gone (fix: nothing, it's gone) vs a
+ * permission issue (fix: grant the bot access to the channel).
+ */
+function describeDiscordError(err: unknown): string {
+    if (!(err instanceof DiscordAPIError)) return String(err);
+    switch (err.code) {
+        case 10003:
+            return 'Unknown Channel (channel deleted)';
+        case 10008:
+            return 'Unknown Message (message deleted)';
+        case 50001:
+            return 'Missing Access (bot role lacks View Channel)';
+        case 50013:
+            return 'Missing Permissions (bot role lacks Send/Embed)';
+        default:
+            return `DiscordAPIError ${err.code} ${err.message}`;
+    }
+}
 
 const UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const RAID_REFRESH_WINDOW_SECONDS = Math.floor((10.5 * 24 * 60 * 60)); // 1.5 weeks
@@ -26,21 +47,15 @@ let loopInterval: ReturnType<typeof setInterval> | null = null;
 
 async function refreshOneRaid(client: Client, raid: Raid): Promise<void> {
     try {
-        const channel = await client.channels.fetch(raid.channelId).catch(() => null);
+        const channel = await client.channels.fetch(raid.channelId);
         if (!channel || !channel.isTextBased()) {
             console.warn(
-                `[RaidUpdater] Channel ${raid.channelId} for raid ${raid.id} is unreachable; skipping.`
+                `[RaidUpdater] Channel ${raid.channelId} for raid ${raid.id} is not text-based; skipping.`
             );
             return;
         }
 
-        const message = await channel.messages.fetch(raid.messageId).catch(() => null);
-        if (!message) {
-            console.warn(
-                `[RaidUpdater] Message ${raid.messageId} for raid ${raid.id} is gone; skipping.`
-            );
-            return;
-        }
+        const message = await channel.messages.fetch(raid.messageId);
 
         const guild =
             client.guilds.cache.get(raid.guildId) ??
@@ -61,7 +76,9 @@ async function refreshOneRaid(client: Client, raid: Raid): Promise<void> {
         const embed = buildRaidEmbed(raid, enriched, notResponded);
         await message.edit({ embeds: [embed], components: [buildRaidButtons()] });
     } catch (err) {
-        console.error(`[RaidUpdater] Failed to refresh raid ${raid.id}:`, err);
+        console.error(
+            `[RaidUpdater] Failed to refresh raid ${raid.id}: ${describeDiscordError(err)}`
+        );
     }
 }
 
