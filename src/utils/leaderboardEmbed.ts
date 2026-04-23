@@ -67,10 +67,18 @@ export function buildLeaderboardEmbed(
             ? `Showing top ${top.length} of ${total} · Updates every 10 min`
             : `${total} characters · Updates every 10 min`;
 
+    // Discord renders <t:UNIX:R> as a live-updating relative timestamp
+    // ("just now", "8 minutes ago"), making it obvious at a glance whether
+    // the post is still being refreshed. Placed above the roster body so
+    // it's always visible even when the list is long.
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const header = `*Last updated <t:${nowUnix}:R>*`;
+    const description = `${header}\n\n${body}`;
+
     const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle(`🏆 M+ Leaderboard — ${leaderboard.wowGuildName}`)
-        .setDescription(body)
+        .setDescription(description)
         .addFields({
             name: '\u200b',
             value: `*${leaderboard.realmSlug} · ${leaderboard.region.toUpperCase()}*`,

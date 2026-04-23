@@ -62,16 +62,41 @@ export function toEmptyEnriched(roster: RaidRoster): EnrichedRoster {
  * Render a single signup as a Markdown block. When the user has matching
  * characters, they appear indented beneath the name, one per line.
  *
- * Example:
+ * When `minIlvl` is set:
+ *   - Alts below the threshold are hidden entirely.
+ *   - The main is always shown; if under, it's flagged red.
+ *   - Characters >5 above the threshold are flagged green.
+ *   - Characters at/just above the threshold (within 5) are flagged blue.
+ *
+ * Discord embed text can't be colored inline, so we use colored-square
+ * emoji prefixes (🟢🔵🔴) as the visual tier indicator while preserving
+ * the clickable user mention on the header line.
+ *
+ * Example (minIlvl = 260):
  *   • sam
- *       ↳ Vyphir | unholy Death Knight | 275 ilvl
- *       ↳ faeyren | feral druid | 225 ilvl
+ *       🟢 Vyphir | unholy Death Knight | 275 ilvl
+ *       🔵 Faeyren | feral druid | 262 ilvl
+ *       🔴 Oldmain | fury warrior | 240 ilvl · under 260
  */
-function formatEnrichedSignup(entry: EnrichedSignup): string {
+function formatEnrichedSignup(entry: EnrichedSignup, minIlvl: number | null): string {
     const head = `• <@${entry.signup.userId}>`;
     if (!entry.characters || entry.characters.length === 0) return head;
 
-    const lines = entry.characters.map((a) => {
+    // Hide alts that fall below the threshold. Mains are always shown
+    // (red-flagged if under) so the raid lead knows the person signed up
+    // but can't meet ilvl on their preferred character.
+    const visible =
+        minIlvl != null
+            ? entry.characters.filter((a) => {
+                  if (a.isMain) return true;
+                  const ilvl = a.character.itemLevel ?? 0;
+                  return ilvl >= minIlvl;
+              })
+            : entry.characters;
+
+    if (visible.length === 0) return head;
+
+    const lines = visible.map((a) => {
         const c = a.character;
         const spec = a.displaySpec;
         const cls = c.className ?? '??';
@@ -80,9 +105,21 @@ function formatEnrichedSignup(entry: EnrichedSignup): string {
         const tags: string[] = [];
         if (!a.isMain) tags.push('alt');
         if (a.isOffspec) tags.push('offspec');
-        const suffix = tags.length > 0 ? ` · *${tags.join(' · ')}*` : '';
 
-        return `   ↳ ${c.characterName} | ${spec.toLowerCase()} ${cls} | ${ilvl}${suffix}`;
+        let prefix = '   ↳';
+        if (minIlvl != null && c.itemLevel != null) {
+            if (c.itemLevel < minIlvl) {
+                prefix = '   🔴';
+                tags.push(`under ${minIlvl}`);
+            } else if (c.itemLevel > minIlvl + 5) {
+                prefix = '   🟢';
+            } else {
+                prefix = '   🔵';
+            }
+        }
+
+        const suffix = tags.length > 0 ? ` · *${tags.join(' · ')}*` : '';
+        return `${prefix} ${c.characterName} | ${spec.toLowerCase()} ${cls} | ${ilvl}${suffix}`;
     });
     return [head, ...lines].join('\n');
 }
@@ -92,10 +129,13 @@ function formatEnrichedSignup(entry: EnrichedSignup): string {
  * stay under Discord's 1024-char embed field limit even when many users
  * have many raid-ready alts.
  */
-function formatRosterField(entries: EnrichedSignup[]): string {
+function formatRosterField(
+    entries: EnrichedSignup[],
+    minIlvl: number | null
+): string {
     if (entries.length === 0) return '—';
 
-    const blocks = entries.map(formatEnrichedSignup);
+    const blocks = entries.map((e) => formatEnrichedSignup(e, minIlvl));
     let output = '';
     for (const block of blocks) {
         const candidate = output.length === 0 ? block : `${output}\n${block}`;
@@ -124,45 +164,56 @@ export function buildRaidEmbed(
     roster: EnrichedRoster,
     notRespondedNames: string[]
 ): EmbedBuilder {
+    // Date / Time / Min ILVL sit side-by-side when min-ilvl is set; when
+    // it isn't, we keep the original (Date, Time, spacer) layout.
+    const headerFields =
+        raid.minIlvl != null
+            ? [
+                  { name: 'Date', value: raid.date, inline: true },
+                  { name: 'Time', value: raid.time, inline: true },
+                  { name: 'Min ILVL', value: `${raid.minIlvl}`, inline: true },
+              ]
+            : [
+                  { name: 'Date', value: raid.date, inline: true },
+                  { name: 'Time', value: raid.time, inline: true },
+                  { name: '\u200b', value: '\u200b', inline: true },
+              ];
+
     const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setTitle(raid.name)
-        .addFields(
-            { name: 'Date', value: raid.date, inline: true },
-            { name: 'Time', value: raid.time, inline: true },
-            { name: '\u200b', value: '\u200b', inline: true }
-        );
+        .addFields(...headerFields);
 
-    if (raid.description && raid.description.trim().length > 0) {
-        embed.setDescription(raid.description);
-    }
+    // Description is rendered as message content (outside the embed) by
+    // the caller so Discord's full markdown set — including # headings and
+    // -# subtext — works. Intentionally NOT calling setDescription here.
 
     // Tank / Healer / DPS are rendered full-width because the nested
     // character rows don't fit comfortably in a 3-column layout.
     embed.addFields(
         {
             name: `🛡️ Tanks (${roster.tank.length})`,
-            value: formatRosterField(roster.tank),
+            value: formatRosterField(roster.tank, raid.minIlvl),
             inline: false,
         },
         {
             name: `💉 Healers (${roster.healer.length})`,
-            value: formatRosterField(roster.healer),
+            value: formatRosterField(roster.healer, raid.minIlvl),
             inline: false,
         },
         {
             name: `⚔️ DPS (${roster.dps.length})`,
-            value: formatRosterField(roster.dps),
+            value: formatRosterField(roster.dps, raid.minIlvl),
             inline: false,
         },
         {
             name: `🕒 Late (${roster.late.length})`,
-            value: formatRosterField(roster.late),
+            value: formatRosterField(roster.late, raid.minIlvl),
             inline: true,
         },
         {
             name: `❌ Decline (${roster.decline.length})`,
-            value: formatRosterField(roster.decline),
+            value: formatRosterField(roster.decline, raid.minIlvl),
             inline: true,
         },
         { name: '\u200b', value: '\u200b', inline: true },

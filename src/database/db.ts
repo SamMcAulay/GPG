@@ -61,6 +61,7 @@ export function initSchema(): void {
             description TEXT,
             createdBy TEXT NOT NULL,
             raiderRoleId TEXT,
+            minIlvl INTEGER,
             createdAt INTEGER NOT NULL DEFAULT (strftime('%s','now'))
         );
 
@@ -136,6 +137,13 @@ export function initSchema(): void {
     if (!columnExists('CharacterCache', 'lastPlayedTs')) {
         db.prepare('ALTER TABLE CharacterCache ADD COLUMN lastPlayedTs INTEGER').run();
         console.log('[DB] Migration: added CharacterCache.lastPlayedTs column.');
+    }
+
+    // Migration: add minIlvl column to Raids for the underleveled-character
+    // warning. NULL on existing rows means no threshold.
+    if (!columnExists('Raids', 'minIlvl')) {
+        db.prepare('ALTER TABLE Raids ADD COLUMN minIlvl INTEGER').run();
+        console.log('[DB] Migration: added Raids.minIlvl column.');
     }
 
     console.log('[DB] Schema ready.');

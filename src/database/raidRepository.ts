@@ -13,6 +13,7 @@ export interface Raid {
     description: string | null;
     createdBy: string;
     raiderRoleId: string | null;
+    minIlvl: number | null;
     createdAt: number;
 }
 
@@ -49,10 +50,11 @@ export function createRaid(params: {
     description: string | null;
     createdBy: string;
     raiderRoleId: string | null;
+    minIlvl: number | null;
 }): Raid {
     const stmt = db.prepare(`
-        INSERT INTO Raids (messageId, channelId, guildId, name, date, time, description, createdBy, raiderRoleId)
-        VALUES (@messageId, @channelId, @guildId, @name, @date, @time, @description, @createdBy, @raiderRoleId)
+        INSERT INTO Raids (messageId, channelId, guildId, name, date, time, description, createdBy, raiderRoleId, minIlvl)
+        VALUES (@messageId, @channelId, @guildId, @name, @date, @time, @description, @createdBy, @raiderRoleId, @minIlvl)
     `);
     const info = stmt.run(params);
     const raid = db
