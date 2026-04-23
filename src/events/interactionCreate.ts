@@ -5,6 +5,7 @@ import {
     MessageFlags,
 } from 'discord.js';
 import { commands } from '../commands';
+import * as makeraid from '../commands/makeraid';
 import {
     getRaidByMessageId,
     getRoster,
@@ -79,14 +80,7 @@ async function handleSignupButton(interaction: ButtonInteraction): Promise<void>
 
     const embed = buildRaidEmbed(raid, enriched, notResponded);
 
-    // Keep the description (rendered as message content for full markdown
-    // support) intact across edits. Passing '' clears it when there was
-    // no description to begin with — which is the correct behavior.
-    const content =
-        raid.description && raid.description.trim().length > 0 ? raid.description : '';
-
     await interaction.editReply({
-        content,
         embeds: [embed],
         components: [buildRaidButtons()],
     });
@@ -117,6 +111,11 @@ export async function execute(interaction: Interaction): Promise<void> {
 
         if (interaction.isButton() && interaction.customId.startsWith('signup_')) {
             await handleSignupButton(interaction);
+            return;
+        }
+
+        if (interaction.isModalSubmit() && makeraid.ownsModal(interaction.customId)) {
+            await makeraid.handleModalSubmit(interaction);
             return;
         }
     } catch (err) {

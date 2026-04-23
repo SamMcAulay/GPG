@@ -184,9 +184,14 @@ export function buildRaidEmbed(
         .setTitle(raid.name)
         .addFields(...headerFields);
 
-    // Description is rendered as message content (outside the embed) by
-    // the caller so Discord's full markdown set — including # headings and
-    // -# subtext — works. Intentionally NOT calling setDescription here.
+    // Description is captured via a paragraph modal so it can contain
+    // newlines and standard markdown (**bold**, *italic*, `code`, quotes,
+    // lists). Newer syntax like # headings and -# subtext doesn't render
+    // inside an embed description — that's the accepted tradeoff for
+    // keeping the description visually inside the raid card.
+    if (raid.description && raid.description.trim().length > 0) {
+        embed.setDescription(raid.description);
+    }
 
     // Tank / Healer / DPS are rendered full-width because the nested
     // character rows don't fit comfortably in a 3-column layout.

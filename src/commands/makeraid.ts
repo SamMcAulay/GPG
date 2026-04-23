@@ -1,8 +1,14 @@
 import {
+    ActionRowBuilder,
     ChatInputCommandInteraction,
+    ModalBuilder,
+    ModalSubmitInteraction,
     SlashCommandBuilder,
     MessageFlags,
+    TextInputBuilder,
+    TextInputStyle,
 } from 'discord.js';
+import { randomUUID } from 'node:crypto';
 import { createRaid, getRoster } from '../database/raidRepository';
 import { buildRaidButtons, buildRaidEmbed, toEmptyEnriched } from '../utils/raidEmbed';
 import { computeNotResponded } from '../utils/raidHelpers';
@@ -31,15 +37,6 @@ export const data = new SlashCommandBuilder()
             .setRequired(true)
             .setMaxLength(50)
     )
-    .addStringOption((opt) =>
-        opt
-            .setName('description')
-            .setDescription(
-                'Optional extra details. Supports full Discord markdown (# headings, -# subtext, etc.)'
-            )
-            .setRequired(false)
-            .setMaxLength(1000)
-    )
     .addRoleOption((opt) =>
         opt
             .setName('role')
@@ -59,6 +56,31 @@ export const data = new SlashCommandBuilder()
             .setMaxValue(9999)
     );
 
+/**
+ * Pending raid data captured from the slash command while we wait for
+ * the user to submit the description modal. Keyed by a per-invocation
+ * nonce that rides in the modal's customId.
+ *
+ * An entry auto-expires after 15 minutes so an abandoned modal can't
+ * leak memory indefinitely.
+ */
+interface PendingRaid {
+    userId: string;
+    channelId: string;
+    guildId: string;
+    name: string;
+    date: string;
+    time: string;
+    raiderRoleId: string | null;
+    minIlvl: number | null;
+    createdBy: string;
+}
+
+const pendingRaids = new Map<string, PendingRaid>();
+const PENDING_TTL_MS = 15 * 60 * 1000;
+
+const MODAL_CUSTOM_ID_PREFIX = 'makeraid_';
+
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.inGuild()) {
         await interaction.reply({
@@ -71,17 +93,93 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const name = interaction.options.getString('name', true);
     const date = interaction.options.getString('date', true);
     const time = interaction.options.getString('time', true);
-    const description = interaction.options.getString('description', false);
     const raiderRole = interaction.options.getRole('role', false);
     const raiderRoleId = raiderRole?.id ?? null;
     const minIlvl = interaction.options.getInteger('min_ilvl', false);
-
-    await interaction.deferReply();
 
     const createdBy =
         interaction.member && 'displayName' in interaction.member
             ? (interaction.member.displayName as string)
             : interaction.user.username;
+
+    const nonce = randomUUID();
+    pendingRaids.set(nonce, {
+        userId: interaction.user.id,
+        channelId: interaction.channelId,
+        guildId: interaction.guildId!,
+        name,
+        date,
+        time,
+        raiderRoleId,
+        minIlvl,
+        createdBy,
+    });
+    setTimeout(() => pendingRaids.delete(nonce), PENDING_TTL_MS).unref();
+
+    // A modal with a paragraph text input gives the user a real multi-line
+    // textarea for the description — something slash command string options
+    // can't do. The other fields (name/date/time/role/min_ilvl) stay on the
+    // slash command since integers and roles aren't valid modal input types.
+    const modal = new ModalBuilder()
+        .setCustomId(`${MODAL_CUSTOM_ID_PREFIX}${nonce}`)
+        .setTitle(`Raid: ${name.slice(0, 35)}`)
+        .addComponents(
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('description')
+                    .setLabel('Description (optional)')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder(
+                        'Extra details. Newlines and basic markdown (**bold**, *italic*, `code`) are supported.'
+                    )
+                    .setRequired(false)
+                    .setMaxLength(1000)
+            )
+        );
+
+    await interaction.showModal(modal);
+}
+
+/** Check whether a given modal customId belongs to this command. */
+export function ownsModal(customId: string): boolean {
+    return customId.startsWith(MODAL_CUSTOM_ID_PREFIX);
+}
+
+/**
+ * Handle the user submitting the description modal. Uses the stashed
+ * slash-command state keyed by the modal's nonce to finish building the
+ * raid post.
+ */
+export async function handleModalSubmit(
+    interaction: ModalSubmitInteraction
+): Promise<void> {
+    if (!interaction.inGuild()) {
+        await interaction.reply({
+            content: 'This modal can only be submitted inside a server.',
+            flags: MessageFlags.Ephemeral,
+        });
+        return;
+    }
+
+    const nonce = interaction.customId.slice(MODAL_CUSTOM_ID_PREFIX.length);
+    const pending = pendingRaids.get(nonce);
+    pendingRaids.delete(nonce);
+
+    if (!pending) {
+        await interaction.reply({
+            content:
+                'This raid request expired or was already submitted. Run `/makeraid` again.',
+            flags: MessageFlags.Ephemeral,
+        });
+        return;
+    }
+
+    const rawDescription = interaction.fields
+        .getTextInputValue('description')
+        ?.trim();
+    const description = rawDescription && rawDescription.length > 0 ? rawDescription : null;
+
+    await interaction.deferReply();
 
     // Post an initial embed with an empty roster so we can capture the
     // message ID, then persist the raid row, then re-render with the
@@ -89,15 +187,15 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const placeholderRaid = {
         id: 0,
         messageId: '',
-        channelId: interaction.channelId,
-        guildId: interaction.guildId!,
-        name,
-        date,
-        time,
+        channelId: pending.channelId,
+        guildId: pending.guildId,
+        name: pending.name,
+        date: pending.date,
+        time: pending.time,
         description,
-        createdBy,
-        raiderRoleId,
-        minIlvl,
+        createdBy: pending.createdBy,
+        raiderRoleId: pending.raiderRoleId,
+        minIlvl: pending.minIlvl,
         createdAt: Math.floor(Date.now() / 1000),
     };
 
@@ -109,8 +207,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         decline: [],
     };
 
-    // Compute the initial "not responded" list right away so the post
-    // is useful the moment it lands.
     const guild = interaction.guild!;
     const initialNotResponded = await computeNotResponded(
         guild,
@@ -125,13 +221,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     );
     const components = [buildRaidButtons()];
 
-    // The description lives in the message content (not inside the embed)
-    // so Discord's newer markdown — headings (#), subtext (-#), ordered
-    // lists — renders correctly. Embed descriptions don't support all of it.
-    const content = description && description.trim().length > 0 ? description : '';
-
     const sent = await interaction.editReply({
-        content,
         embeds: [embed],
         components,
     });
@@ -139,14 +229,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const raid = createRaid({
         messageId: sent.id,
         channelId: sent.channelId,
-        guildId: interaction.guildId!,
-        name,
-        date,
-        time,
+        guildId: pending.guildId,
+        name: pending.name,
+        date: pending.date,
+        time: pending.time,
         description,
-        createdBy,
-        raiderRoleId,
-        minIlvl,
+        createdBy: pending.createdBy,
+        raiderRoleId: pending.raiderRoleId,
+        minIlvl: pending.minIlvl,
     });
 
     const freshRoster = getRoster(raid.id);
@@ -157,7 +247,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         freshNotResponded
     );
     await interaction.editReply({
-        content,
         embeds: [freshEmbed],
         components,
     });
