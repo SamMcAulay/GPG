@@ -1,6 +1,7 @@
 import { Client, Events, REST, Routes } from 'discord.js';
 import { commands } from '../commands';
 import { restoreAllLeaderboards } from '../services/leaderboardUpdater';
+import { startRaidUpdates } from '../services/raidUpdater';
 
 export const name = Events.ClientReady;
 export const once = true;
@@ -92,4 +93,8 @@ export async function execute(client: Client<true>): Promise<void> {
 
     // Restore any persisted M+ leaderboard update loops.
     restoreAllLeaderboards(client);
+
+    // Kick off the background raid-post refresher so recent raid embeds
+    // auto-update ilvl/spec/class every 10 min without a button click.
+    startRaidUpdates(client);
 }

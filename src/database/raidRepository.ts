@@ -74,6 +74,17 @@ export function getRaidById(id: number): Raid | undefined {
 }
 
 /**
+ * Return all raids created at or after the given unix-seconds timestamp,
+ * oldest first. Used by the background refresher to re-enrich recent
+ * raid posts so ilvl/spec stay current without a button click.
+ */
+export function getRaidsCreatedSince(sinceUnixSeconds: number): Raid[] {
+    return db
+        .prepare('SELECT * FROM Raids WHERE createdAt >= ? ORDER BY createdAt ASC')
+        .all(sinceUnixSeconds) as Raid[];
+}
+
+/**
  * Insert or update a user's signup for a raid. Uses UPSERT on the
  * (raidId, userId) unique index so role changes just overwrite in place.
  */
