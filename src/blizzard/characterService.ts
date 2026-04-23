@@ -96,6 +96,30 @@ export async function getAllCharactersForUser(
 }
 
 /**
+ * Force an immediate Battle.net cache refresh for a user, bypassing the
+ * TTL check. Called by the periodic raid-post refresher so embed data
+ * reflects Blizzard's current state rather than a 10-minute-old snapshot.
+ *
+ * Silently no-ops if the user isn't linked or token refresh fails — the
+ * embed will then render from whatever cache existed (or mark the user
+ * as unlinked, which is already handled downstream).
+ */
+export async function forceRefreshCharacterCache(
+    discordUserId: string
+): Promise<void> {
+    const link = await getValidAccessToken(discordUserId);
+    if (!link) return;
+    try {
+        await refreshCharacterCache(discordUserId, link.accessToken);
+    } catch (err) {
+        console.error(
+            `[Blizzard] Forced cache refresh failed for ${discordUserId}:`,
+            err
+        );
+    }
+}
+
+/**
  * Pull the full account summary, walk every character at the raid level,
  * fetch its detail, compute its role from the active spec, and persist
  * the resulting set as an atomic replace.

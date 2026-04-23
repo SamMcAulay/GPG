@@ -18,6 +18,7 @@ import { getRaidsCreatedSince, getRoster, type Raid } from '../database/raidRepo
 import { buildRaidEmbed, buildRaidButtons } from '../utils/raidEmbed';
 import { computeNotResponded } from '../utils/raidHelpers';
 import { enrichRoster } from '../utils/rosterEnricher';
+import { forceRefreshCharacterCache } from '../blizzard/characterService';
 
 /**
  * Summarise a Discord API error so the operator can tell at a glance
@@ -91,9 +92,29 @@ async function tick(client: Client): Promise<void> {
         `[RaidUpdater] Refreshing ${raids.length} raid post(s) from the last 10.5 days...`
     );
 
-    // Serial iteration. Each raid's enrichRoster already parallelises
-    // per-signup Battle.net lookups; running multiple raids concurrently
-    // would mostly just race on shared per-user caches.
+    // Force-refresh every unique signed-up user's Battle.net cache before
+    // rendering any embed. Without this, the per-user cache TTL (10 min)
+    // races the tick interval (10 min) and the refresh gets skipped — so
+    // embeds re-render with stale ilvl/spec. Dedup across raids so users
+    // signed up to multiple raids only trigger one API round-trip.
+    const uniqueUserIds = new Set<string>();
+    for (const raid of raids) {
+        const roster = getRoster(raid.id);
+        for (const role of ['tank', 'healer', 'dps'] as const) {
+            for (const signup of roster[role]) uniqueUserIds.add(signup.userId);
+        }
+    }
+    if (uniqueUserIds.size > 0) {
+        console.log(
+            `[RaidUpdater] Force-refreshing Battle.net cache for ${uniqueUserIds.size} user(s)...`
+        );
+        await Promise.all(
+            [...uniqueUserIds].map((userId) => forceRefreshCharacterCache(userId))
+        );
+    }
+
+    // Serial iteration. enrichRoster now reads the just-refreshed cache,
+    // so running raids concurrently would only add Discord API contention.
     for (const raid of raids) {
         await refreshOneRaid(client, raid);
     }
