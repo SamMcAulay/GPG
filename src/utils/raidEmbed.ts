@@ -181,7 +181,6 @@ export function buildRaidEmbed(
 
     const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTitle(raid.name)
         .addFields(...headerFields);
 
     // Description is captured via a paragraph modal so it can contain

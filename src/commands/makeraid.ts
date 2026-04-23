@@ -18,13 +18,6 @@ export const data = new SlashCommandBuilder()
     .setDescription('Create a new raid signup post')
     .addStringOption((opt) =>
         opt
-            .setName('name')
-            .setDescription('Raid name')
-            .setRequired(true)
-            .setMaxLength(100)
-    )
-    .addStringOption((opt) =>
-        opt
             .setName('date')
             .setDescription('Date of the raid, e.g. "Saturday 2026-04-18"')
             .setRequired(true)
@@ -68,7 +61,6 @@ interface PendingRaid {
     userId: string;
     channelId: string;
     guildId: string;
-    name: string;
     date: string;
     time: string;
     raiderRoleId: string | null;
@@ -90,7 +82,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    const name = interaction.options.getString('name', true);
     const date = interaction.options.getString('date', true);
     const time = interaction.options.getString('time', true);
     const raiderRole = interaction.options.getRole('role', false);
@@ -107,7 +98,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         userId: interaction.user.id,
         channelId: interaction.channelId,
         guildId: interaction.guildId!,
-        name,
         date,
         time,
         raiderRoleId,
@@ -118,11 +108,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     // A modal with a paragraph text input gives the user a real multi-line
     // textarea for the description — something slash command string options
-    // can't do. The other fields (name/date/time/role/min_ilvl) stay on the
+    // can't do. The other fields (date/time/role/min_ilvl) stay on the
     // slash command since integers and roles aren't valid modal input types.
     const modal = new ModalBuilder()
         .setCustomId(`${MODAL_CUSTOM_ID_PREFIX}${nonce}`)
-        .setTitle(`Raid: ${name.slice(0, 35)}`)
+        .setTitle('New Raid')
         .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
                 new TextInputBuilder()
@@ -181,6 +171,12 @@ export async function handleModalSubmit(
 
     await interaction.deferReply();
 
+    // raid.name is no longer displayed — we dropped the embed title so
+    // the user can put whatever title/headline they want in the description.
+    // The DB column is NOT NULL though, so we store the date as a
+    // self-describing fallback for any future admin queries.
+    const storedName = pending.date;
+
     // Post an initial embed with an empty roster so we can capture the
     // message ID, then persist the raid row, then re-render with the
     // real ID so the footer timestamp matches the DB record.
@@ -189,7 +185,7 @@ export async function handleModalSubmit(
         messageId: '',
         channelId: pending.channelId,
         guildId: pending.guildId,
-        name: pending.name,
+        name: storedName,
         date: pending.date,
         time: pending.time,
         description,
@@ -230,7 +226,7 @@ export async function handleModalSubmit(
         messageId: sent.id,
         channelId: sent.channelId,
         guildId: pending.guildId,
-        name: pending.name,
+        name: storedName,
         date: pending.date,
         time: pending.time,
         description,
