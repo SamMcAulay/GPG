@@ -2,10 +2,10 @@
 # @types/*) are available during the build phase. Without --include=dev,
 # Railway's build image defaults to a production install and `tsc` is missing.
 #
-# python3 is required by node-gyp to compile better-sqlite3's native addon.
+# python3, gcc, and gnumake are required by node-gyp to compile better-sqlite3's native addon.
 
 [phases.setup]
-nixPkgs = ["nodejs_24", "python3"]
+nixPkgs = ["nodejs_24", "python3", "gcc", "gnumake"]
 
 [phases.install]
 cmds = ["npm ci --include=dev"]
