@@ -1,4 +1,4 @@
-import { getValidAccessToken } from './oauth';
+import { getValidAccessToken, getClientCredentialToken } from './oauth';
 import {
     fetchAccountCharacters,
     fetchCharacterDetails,
@@ -100,23 +100,76 @@ export async function getAllCharactersForUser(
  * TTL check. Called by the periodic raid-post refresher so embed data
  * reflects Blizzard's current state rather than a 10-minute-old snapshot.
  *
- * Silently no-ops if the user isn't linked or token refresh fails — the
- * embed will then render from whatever cache existed (or mark the user
- * as unlinked, which is already handled downstream).
+ * For OAuth-linked users: re-fetches the full account roster.
+ * For /assign-only users (no OAuth link): re-fetches each cached character
+ * individually via a client credential token so their ilvl stays current.
  */
 export async function forceRefreshCharacterCache(
     discordUserId: string
 ): Promise<void> {
     const link = await getValidAccessToken(discordUserId);
-    if (!link) return;
+
+    if (link) {
+        try {
+            await refreshCharacterCache(discordUserId, link.accessToken);
+        } catch (err) {
+            console.error(
+                `[Blizzard] Forced cache refresh failed for ${discordUserId}:`,
+                err
+            );
+        }
+        return;
+    }
+
+    // No OAuth link — user was assigned via /assign. Re-fetch each cached
+    // character individually using a client credential token.
+    const cached = getAllCachedCharacters(discordUserId, RAID_LEVEL);
+    if (cached.length === 0) return;
+
+    let clientToken: string;
     try {
-        await refreshCharacterCache(discordUserId, link.accessToken);
+        clientToken = await getClientCredentialToken();
     } catch (err) {
         console.error(
-            `[Blizzard] Forced cache refresh failed for ${discordUserId}:`,
+            `[Blizzard] Failed to get client credential token for assigned-user refresh (${discordUserId}):`,
             err
         );
+        return;
     }
+
+    const rows: Array<Omit<CachedCharacter, 'discordUserId' | 'fetchedAt'>> = [];
+    for (const c of cached) {
+        const detail = await fetchCharacterDetails(clientToken, c.realmSlug, c.characterName);
+        if (!detail) {
+            // Keep the existing row so one missing character doesn't wipe the others.
+            rows.push({
+                realmSlug: c.realmSlug,
+                characterName: c.characterName,
+                level: c.level,
+                className: c.className,
+                activeSpec: c.activeSpec,
+                itemLevel: c.itemLevel,
+                role: c.role,
+                lastPlayedTs: c.lastPlayedTs,
+            });
+            continue;
+        }
+        rows.push({
+            realmSlug: detail.realmSlug,
+            characterName: detail.name,
+            level: detail.level,
+            className: detail.className,
+            activeSpec: detail.activeSpecName,
+            itemLevel: detail.itemLevel,
+            role: specToRole(detail.activeSpecName),
+            lastPlayedTs: detail.lastPlayedTimestamp ?? null,
+        });
+    }
+
+    replaceCharacterCache(discordUserId, rows);
+    console.log(
+        `[Blizzard] Re-cached ${rows.length} assigned character(s) for ${discordUserId}.`
+    );
 }
 
 /**
